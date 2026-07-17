@@ -1,0 +1,1934 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>SBAMI — Phlebotomist Demo</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #EDEBE6; overscroll-behavior: none; }
+  #root { min-height: 100vh; }
+  #boot-loading {
+    position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    font-family: -apple-system, system-ui, sans-serif; color: #5F7B86; font-size: 14px; text-align: center; padding: 24px;
+  }
+  #boot-error {
+    position: fixed; inset: 0; display: none; flex-direction: column; align-items: center; justify-content: center;
+    font-family: -apple-system, system-ui, sans-serif; color: #264653; background: #FAF9F6; padding: 28px; text-align: left;
+  }
+  #boot-error pre {
+    background: #F4F2ED; border-radius: 12px; padding: 14px; max-width: 480px; width: 100%; overflow: auto;
+    font-size: 12px; color: #C4584C; white-space: pre-wrap; word-break: break-word; box-sizing: border-box;
+  }
+</style>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7/babel.min.js" crossorigin="anonymous"></script>
+</head>
+<body>
+<div id="root"><div id="boot-loading">Loading SBAMI prototype…<br/>If this doesn't disappear in a few seconds, check your internet connection — this demo loads React from a CDN.</div></div>
+<div id="boot-error">
+  <div style="font-weight:700; font-size:17px; margin-bottom:8px;">This demo couldn't start</div>
+  <div style="font-size:13px; color:#5F7B86; margin-bottom:14px;">Here's the actual error, so it can be fixed:</div>
+  <pre id="boot-error-detail"></pre>
+</div>
+
+<script id="app-source" type="text/plain">
+const { useState, useMemo, useEffect, createContext, useContext } = React;
+
+/* ============================================================
+   SBAMI Home Sample Collection — working prototype
+   One-file React app. Every flow from the build thread wired
+   through real state. Warm-teal design system, tokens only.
+   ============================================================ */
+
+/* ---------- design tokens ---------- */
+const T = {
+  bg: "#FAF9F6", bgTint: "#F2F7F6", surface: "#FFFFFF", sunken: "#F4F2ED",
+  brand: "#2A9D8F", brandDeep: "#217F74", brandSoft: "#E6F4F1",
+  accent: "#F4A261", accentStrong: "#EC8B45", accentSoft: "#FDF0E3",
+  fg: "#264653", fgMuted: "#5F7B86", fgSubtle: "#8FA3AC",
+  border: "#E6E1D9", borderStrong: "#D5CEC3",
+  success: "#5C9A6B", successSoft: "#EAF3EC",
+  warning: "#E0A038", warningSoft: "#FBF2E2",
+  error: "#C4584C", errorSoft: "#F8EAE8",
+  info: "#4A90A4", infoSoft: "#E9F1F4",
+};
+const RAD = 16;
+const tnum = { fontVariantNumeric: "tabular-nums" };
+
+/* ---------- i18n (EN + HI) ---------- */
+const STR = {
+  en: {
+    appName: "SBAMI", tagline: "Home Sample Collection",
+    bookTest: "Book a Test", bookHome: "Book a home test",
+    phleboComes: "Our phlebotomist comes to you",
+    upcoming: "Upcoming tests", reports: "Lab Reports", noUpcoming: "No upcoming tests",
+    whoFor: "Who is this test for?", addPatient: "Add another patient",
+    continue: "Continue", back: "Back",
+  },
+  hi: {
+    appName: "SBAMI", tagline: "घर पर सैंपल कलेक्शन",
+    bookTest: "टेस्ट बुक करें", bookHome: "घर पर टेस्ट बुक करें",
+    phleboComes: "हमारे फ्लेबोटोमिस्ट आपके पास आएंगे",
+    upcoming: "आगामी टेस्ट", reports: "रिपोर्ट्स", noUpcoming: "कोई आगामी टेस्ट नहीं",
+    whoFor: "यह टेस्ट किसके लिए है?", addPatient: "एक और मरीज़ जोड़ें",
+    continue: "आगे बढ़ें", back: "वापस",
+  },
+};
+/* BOOT_ROLE: set by standalone HTML builds to force-boot into 'patient' or 'phlebo'.
+   Left undefined in the normal artifact, where the person can switch via Staff login. */
+if (typeof window !== "undefined" && typeof window.BOOT_ROLE === "undefined") window.BOOT_ROLE = undefined;
+const BOOT_ROLE = typeof window !== "undefined" ? window.BOOT_ROLE : undefined;
+
+/* BOOT_SCENARIO: set by standalone client-demo HTML builds to pin the login screen to one
+   of the two patient scenarios — 'existing' (record found) or 'new' (no record, registration
+   required) — so a client reviewing that build only ever sees the one flow it was made for.
+   Left undefined in the normal artifact, where both scenarios remain reachable as usual. */
+if (typeof window !== "undefined" && typeof window.BOOT_SCENARIO === "undefined") window.BOOT_SCENARIO = undefined;
+const BOOT_SCENARIO = typeof window !== "undefined" ? window.BOOT_SCENARIO : undefined;
+const EXISTING_PATIENT_MOBILE = "9810234567";
+
+const LangCtx = createContext({ lang: "en", t: (k) => STR.en[k] || k, toggle: () => {} });
+const useLang = () => useContext(LangCtx);
+
+/* ---------- mock catalogue ---------- */
+const CATALOGUE = [
+  { code: "CBC", en: "Complete Blood Count", hi: "सीबीसी", price: 350, fasting: 0, vial: "EDTA (lavender)", tat: 24, cat: "Popular" },
+  { code: "LIPID", en: "Lipid Profile", hi: "लिपिड प्रोफाइल", price: 700, fasting: 12, vial: "SST (gold)", tat: 24, cat: "Heart" },
+  { code: "HBA1C", en: "HbA1c (Glycated Hb)", hi: "एचबीए1सी", price: 550, fasting: 0, vial: "EDTA (lavender)", tat: 24, cat: "Diabetes" },
+  { code: "FBS", en: "Fasting Blood Sugar", hi: "फास्टिंग ब्लड शुगर", price: 120, fasting: 10, vial: "Fluoride (grey)", tat: 12, cat: "Diabetes" },
+  { code: "TSH", en: "TSH", hi: "टीएसएच", price: 400, fasting: 0, vial: "SST (gold)", tat: 24, cat: "Thyroid" },
+  { code: "VITD", en: "Vitamin D", hi: "विटामिन डी", price: 1200, fasting: 0, vial: "SST (gold)", tat: 48, cat: "Vitamins" },
+  { code: "VITB12", en: "Vitamin B12", hi: "विटामिन बी12", price: 900, fasting: 0, vial: "SST (gold)", tat: 48, cat: "Vitamins" },
+  { code: "LFT", en: "Liver Function Test", hi: "एलएफटी", price: 650, fasting: 8, vial: "SST (gold)", tat: 24, cat: "Liver" },
+  { code: "KFT", en: "Kidney Function Test", hi: "केएफटी", price: 650, fasting: 8, vial: "SST (gold)", tat: 24, cat: "Kidney" },
+  { code: "THYROID", en: "Thyroid Profile (T3 T4 TSH)", hi: "थायराइड प्रोफाइल", price: 600, fasting: 0, vial: "SST (gold)", tat: 24, cat: "Thyroid" },
+  { code: "URINE", en: "Urine Routine", hi: "यूरिन रूटीन", price: 200, fasting: 0, vial: "Container", tat: 12, cat: "Popular" },
+  { code: "DENGUE", en: "Dengue NS1", hi: "डेंगू एनएस1", price: 800, fasting: 0, vial: "SST (gold)", tat: 24, cat: "Fever" },
+  { code: "FULLBODY", en: "Complete Health Checkup", hi: "संपूर्ण हेल्थ चेकअप", price: 2400, fasting: 12, vial: "Multiple", tat: 48, cat: "Popular", pkg: 12 },
+];
+const CATS = ["Popular", "Diabetes", "Thyroid", "Vitamins", "Heart", "Liver", "Kidney", "Fever"];
+
+/* ---------- localities near Paschim Vihar (SBAMI centre) ---------- */
+const LOCALITIES = [
+  { name: "A-4 Block, Paschim Vihar", km: 0.8 }, { name: "A-6 Block, Paschim Vihar", km: 1.1 },
+  { name: "Rajouri Garden", km: 4.2 }, { name: "Punjabi Bagh", km: 3.6 },
+  { name: "Peeragarhi", km: 2.4 }, { name: "Janakpuri", km: 5.8 },
+  { name: "Nangloi", km: 6.9 }, { name: "Vikaspuri", km: 4.9 },
+  { name: "Uttam Nagar", km: 7.8 }, { name: "Tilak Nagar", km: 6.1 },
+];
+
+/* ---------- seed patients & reports ---------- */
+const SEED_PATIENTS = [
+  { id: "p1", name: "Sunita Sharma", uhid: "10024871", relation: "Self", age: 62, gender: "Female", sbami: true, hasRx: false, rxCodes: ["CBC", "LIPID", "HBA1C"], rxDate: "12 Jul 2026", rxDoctor: "Dr. Meena Kapoor" },
+];
+/* mock: tests a doctor prescribed for this patient at SBAMI, from Akhil */
+const prescribedFor = (patient) => (patient?.rxCodes || []).map((code) => CATALOGUE.find((c) => c.code === code)).filter(Boolean);
+const SEED_REPORTS = [
+  { id: "r1", patientId: "p1", test: "Complete Blood Count", lab: "LAB/26/04821", date: "10 Jul 2026", ready: true, abnormal: false },
+  { id: "r2", patientId: "p1", test: "HbA1c (Glycated Hb)", lab: "LAB/26/04822", date: "10 Jul 2026", ready: true, abnormal: true },
+];
+
+/* ---------- helpers ---------- */
+const rupee = (n) => "₹" + n.toLocaleString("en-IN");
+const uid = () => Math.random().toString(36).slice(2, 8);
+const genVisitCode = () => {
+  const A = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  return Array.from({ length: 4 }, () => A[Math.floor(Math.random() * A.length)]).join("");
+};
+const nextDays = (n) => {
+  const out = []; const d = new Date(2026, 6, 16);
+  for (let i = 1; i <= n; i++) { const x = new Date(d); x.setDate(d.getDate() + i);
+    out.push({ key: x.toISOString().slice(0, 10),
+      label: x.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" }) }); }
+  return out;
+};
+const SLOTS = ["06:00–08:00 AM", "08:00–10:00 AM", "10:00–12:00 PM", "12:00–02:00 PM", "02:00–04:00 PM", "04:00–06:00 PM"];
+
+/* ---------- SBAMI logo (inline SVG: hand cradling flame) ---------- */
+const LOGO_SRC = "data:image/webp;base64,UklGRtgJAABXRUJQVlA4WAoAAAAQAAAAXwAAXwAAQUxQSKoAAAABgCTAbdxm/v9p3GISAJN0OUTEBPBG6vU2mi6h7Tg5Jsk3RN4JcrdTopcyjZTromQPZTsofU/5W2q4o44bajmnnlNqOqOuF6ntM/W9Ro1fU+dL1PpzUO8r1Pw7ou4/AWr/Dwjl+AmgGt8RinEFtfgcKMUlVOJhIa6hDoNluIgqDBdhvAaLJVitwHIB1uMwDMMyCtMgfEOwjsDdjkAzMo0ItiB9jY5jlH2AL1ZQOCAICQAA0CgAnQEqYABgAD49GIpDoiGKrQN+EAHiWoAyufMTYfAfkB7Plj/uX4H/IrpFyldx38j7cvg76tPzh/xvcF/Trpx+Yv9ev+N/tPdm9DP+b9Qf+m/4nrVPQP8s79wPhL/aL91PaH/8N6yfl+kh9UpH/vZ+n4sfil/VeSD/JZgX3C/xv5jcyOlQ0AP0L58v+p5Zfob/ne4N/Jf6B/rfzn/yfzOey/9qvZ7/Y10q4u3jJ+M9V0oY4rLTGfFsN/5J1r/x5wueRKzjggjMO2EdbB2ti8J6FnTrNM9m8uHmwH6c1HoRIdw3BB2SVhnrz7WJDFRUYEiYBSXdDXQF8OUG7/H/nuKsBbWYAXH7Rpa2xPa6ZU207EL+NCDvI7sAznTMV+wCLnxw9Jc2O//3TWgPzDG/13jbxq7pqWmsDb1BrxYfxWo4WRfSxKHr0gfNkssDNAAA/v89WS35WSJkwMkNynaTCSg7hK232doKgJOx4eUAXXUBRdJapu8mMQF6Mhi7ieMxCmSDJqOEDYClNUvzVQutjnYdXb4+n8dkUeT53OUqhDqGrtpOaqnOXFj828jLu705SPnfE4pOZ5V3dj/J3DGUTuYegi6At9eRu+UEyiLBhO6T9GIUQaR7ivZ9tkX1lXIrZ41tEb3RX4bfwbphj789iJiTx/1Xfi67DUOEKlw86qmi13mOrcRq/dZvu0rOcJan02NcZMidqHZP5EDpvjd+a1BHR859dHgLevpIkKyeoJeDDtS6HwbDYVzoz/l3o0/cigk6P/NzV3vD65+eIp3fbew7KDMPtyIhDMha/44URa/YhIJ01FeiWAKgwJPeYs1VKSw03m8wMJxTZ12IiwcOU5hDW0Ho96mvXHBJMG/0BaOYj/Z80JLJg2ZMRyqoVmjzdvQkQtYKtKvehv2VkL2EjhlQRV/mAUzI0tVsR/5r8kq6m4OmAoUy7hWEI3ta1ZSYEXoetyLAMUNgOMg7id9uRjWUmFmG+W4SJEFUQDdMG91mfms+NnuNgvI3PNcRP0pZ2NcGolj0WuXBswUj1gm6vcI8kQbbGxeXEtDu6Q6NeKvb6bOo331PSt7e+J1tdarfFusrm6psGYp2sH4Y0tKX44aL/AWljxR2e9KB4koLzU54CaLr9i5Q77sRNJuEMEyxHQ9Jjsr16hu8LCPzhEUXKtlM5hLGBIwh82i2NBoZxbbeGxCoKnQ5G5oiKFiRlo0Kchb9Vit7AEih8DPD0JXm3+6CN9j82ghKS/dMu+bC4p+4xP5Oau/+X2GCM0PsM+ojawk42G7O8MHKlMzcaITUfLJpfQicykManp1eIzwNc+0fk/s5YO7aHHO3Q7ZBAGHcZPOw52Y4f7viYz4bQv/XXHwCAX4QJhVFNSdNvxUnvtuzdybybsY7nUN7A5hSS7L5BynX1fhUyDLXJCc2WyhyqsdEL4pPUdXWpooSd9lVwAp+oAnT9WEeDlNqrZjofjcAO8yIR2W5wnXDfAB4o4WZL8IKJvoIbnTlzmYeRDK5mHQPPDJdXP89F+AAPjxhyQ6ehVy+Fyhccyxv6wwmR6ZWtMoWfyC4s8EmBuc76ktIWhgqjUo4PNQbH7AhLw1Os1RrVlQe68ios8K9nCcGZPCuqGSRKXivQDxXZLFJtVF8CasQCkB0GYd21n6qojNQrQ7tALXdBy92jn4aa7O/oiQbH0emSSheUdHX8bbY2MNavYO4zalCNPscFRr6ziqFy6qC2KvrNNeLOAuP9tT3yqgHpE/tgeJtVcBN+9D/fkBP2/PeFD7elrjuglyIwqwNfz2uqf/tUMxYNWaxi9bt5SablicsmUY2Gc8MzDuchVVSHbcOef7P0dtp3zP65gPj1rZ7z/yK4OmYMItSNGxvOQ+3r68PuuiC5yBiNkTQSBs4tdL8dtxOGLgdMMdxemlIzcBfjSaJeUJlz6Naz2pIvYSRWTUF9yMdkwY/llFhLJUz8xL+F0XeE5U1l2mgD7M2EZJRvM10Ff91iXmNgvVIHaRjy/RdzXq/gDTkBtUTmhd9i9l4imKMO+o2y6tG6uYUm0Ed85+3dyv38Bgz8ZLJnRiJNt8xzVbzx686vGi8i70jRb4MJiuEeLK5MXh4hNkMI5NpP6iCFfoq7U9vEktPYwhvEoI8cp7lI2BcJj/WpRT79JVOE3s0tH9ZoG4wt871arhfvmF5zX2B9reV3wx2uMKVqmPKflQ/ZefF4ahY7eyJ55oWAXOjFCtjQ/uvASU8iz4bBhIVkA/3aRuXQOE/a9CESaP3txnVxWhhUXg5WI/JEQ9vSvA6UcgxSJgDQkGAvIdKC3R/GW7iQ4IC55dwfvk9/pU1HQUfdmugGVMA9/qpCD4ECTquw9vh1BJkqw/aj6tGwXPxYCNT3xx1TxNXiBG83TEEOdunJ4bDX6cBYccNdSE8Z2hHR2fOELmJdhqv/9J2K0ib2XAp3ZtYNL5F1p06gH1b2ueTq9HxC+imCJppP9AT5IZCqcQXCu/vzjZonWH2PSX+p9jPLALkhGWHZTebD0h/qnpakoHSA3EU6AMkF/XzkPjqImoovgI5Gmrx+KiM9v9+cCLGG1ObR3kvFEwUXL5cpKtz7uIV0WRXnqZRWIApWxPqmLUhP+X+5kf7a7evCuPG3rxtVr4n8HQWYy6XrB3ENEbOc19eXUpJyDo5QlmimfsxG7oQIwyAfRLNkLZgJCPuERCvGh6u5SnF46XT3kOLBkIDETmMQ5MQqPHJ2sUGyBD1604X+sJ0XigJUQJR+X50exuCQ1pAqPl+ClFgW7/mfCcSccMEL54VdlA9Gx5L6UaGaGMa0+T98eM6+A7gjl2Gd5p2d/IupHzI2lTmY2Syg2MaRRubvZSW9pjG2ypw8s1DK43rfGmN/owpxtuLNGVHh6o8geqO/9z6ipBYOkX+7upK7JX8fIG4hr4GOJYqv/m29YB0J1/uKaSVNt9DNZ9nkILZ9xfQQPenaGjH12Yk/BUfvFvXa3HbtbDYrJWiy0mqwMvw6LMkqnZ1kHuQykXfi80Jkp4fgxV5/n4HJMeok1UXi8+MYG+BYg2vVoxeu0f+9D7YZdqWMTCX74z/Nm9GhywAAAA=";
+function Logo({ size = 40 }) {
+  return (
+    <img src={LOGO_SRC} width={size} height={size}
+      alt="Sri Balaji Action Medical Institute"
+      style={{ display: "block", borderRadius: "50%" }} />
+  );
+}
+
+/* Full wordmark used on login and profile drawer */
+function Wordmark({ center }) {
+  return (
+    <div style={{ display: center ? "flex" : "block", justifyContent: "center" }}>
+      <div style={{ display: "inline-block", textAlign: "left", lineHeight: 1.05 }}>
+        <div style={{ fontSize: 12, fontWeight: 600, color: T.brand, letterSpacing: 0.3 }}>Sri Balaji</div>
+        <div style={{ fontSize: 22, fontWeight: 700, color: T.brandDeep, letterSpacing: -0.2, whiteSpace: "nowrap" }}>Action Medical Institute</div>
+        <div style={{ fontSize: 11, fontWeight: 600, color: T.fgMuted, letterSpacing: 1.2, textTransform: "uppercase", marginTop: 2 }}>Multi Speciality Hospital</div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- shared UI primitives ---------- */
+const toneMap = {
+  neutral: { bg: T.surface, br: null }, brand: { bg: T.brandSoft, br: T.brand },
+  accent: { bg: T.accentSoft, br: T.accent }, success: { bg: T.successSoft, br: T.success },
+  warning: { bg: T.warningSoft, br: T.warning }, error: { bg: T.errorSoft, br: T.error },
+  info: { bg: T.infoSoft, br: T.info },
+};
+function Card({ tone = "neutral", onClick, children, style }) {
+  const tn = toneMap[tone];
+  return (
+    <div onClick={onClick} style={{
+      background: tn.bg, borderRadius: RAD, padding: 18,
+      boxShadow: "0 2px 12px rgba(38,70,83,0.06)",
+      borderLeft: tn.br ? `3px solid ${tn.br}` : "none",
+      cursor: onClick ? "pointer" : "default", ...style,
+    }}>{children}</div>
+  );
+}
+function AccentBtn({ children, onClick, disabled, reason }) {
+  return (
+    <div style={{ width: "100%" }}>
+      <button onClick={onClick} disabled={disabled} style={{
+        width: "100%", minHeight: 52, borderRadius: RAD, border: "none",
+        background: disabled ? T.sunken : T.accent, color: disabled ? T.fgSubtle : T.fg,
+        fontWeight: 600, fontSize: 15, cursor: disabled ? "not-allowed" : "pointer",
+        fontFamily: "inherit",
+      }}>{children}</button>
+      {disabled && reason && <div style={{ fontSize: 12, color: T.fgMuted, textAlign: "center", marginTop: 6 }}>{reason}</div>}
+    </div>
+  );
+}
+function PrimaryBtn({ children, onClick, disabled }) {
+  return (
+    <button onClick={onClick} disabled={disabled} style={{
+      width: "100%", minHeight: 52, borderRadius: RAD, border: "none",
+      background: disabled ? T.sunken : T.brandDeep, color: disabled ? T.fgSubtle : "#fff",
+      fontWeight: 600, fontSize: 15, cursor: disabled ? "not-allowed" : "pointer", fontFamily: "inherit",
+    }}>{children}</button>
+  );
+}
+function GhostBtn({ children, onClick, color = T.brandDeep }) {
+  return <button onClick={onClick} style={{ background: "none", border: "none", color, fontWeight: 600, fontSize: 14, cursor: "pointer", fontFamily: "inherit", padding: "8px 4px" }}>{children}</button>;
+}
+function OutlineBtn({ children, onClick, color = T.borderStrong, text = T.fg }) {
+  return <button onClick={onClick} style={{ width: "100%", minHeight: 52, borderRadius: RAD, background: T.surface, border: `1px solid ${color}`, color: text, fontWeight: 600, fontSize: 15, cursor: "pointer", fontFamily: "inherit" }}>{children}</button>;
+}
+function Pill({ children, tone = "neutral" }) {
+  const tn = toneMap[tone];
+  return <span style={{ background: tn.bg, color: tn.br || T.fgMuted, borderRadius: 999, padding: "3px 10px", fontSize: 12, fontWeight: 600, whiteSpace: "nowrap" }}>{children}</span>;
+}
+function Label({ children }) {
+  return <div style={{ fontSize: 13, fontWeight: 700, letterSpacing: 0.5, color: T.fgMuted, textTransform: "uppercase", marginBottom: 8 }}>{children}</div>;
+}
+function Field({ label, value, onChange, placeholder, numeric, note }) {
+  return (
+    <div style={{ marginBottom: 12 }}>
+      {label && <div style={{ fontSize: 13, color: T.fgMuted, marginBottom: 6, fontWeight: 500 }}>{label}</div>}
+      <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder}
+        inputMode={numeric ? "numeric" : "text"}
+        style={{ width: "100%", minHeight: 50, borderRadius: RAD, border: "none", background: T.sunken,
+          padding: "0 14px", fontSize: 15, color: T.fg, fontFamily: "inherit", boxSizing: "border-box" }} />
+      {note && <div style={{ fontSize: 12, color: T.fgSubtle, marginTop: 5 }}>{note}</div>}
+    </div>
+  );
+}
+
+/* ---------- stepper (no bubble, active = teal bold + coral underline) ---------- */
+function Stepper({ step }) {
+  const steps = ["Tests", "Date & Address", "Review"];
+  return (
+    <div style={{ display: "flex", gap: 10, alignItems: "flex-start", padding: "4px 0 14px" }}>
+      {steps.map((s, i) => {
+        const active = i === step, done = i < step;
+        return (
+          <React.Fragment key={s}>
+            <div style={{ textAlign: "center" }}>
+              <div style={{ fontSize: 13, fontWeight: active ? 600 : 400,
+                color: active ? T.brandDeep : done ? T.fgMuted : T.fgSubtle }}>
+                {done ? "✓ " : `${i + 1}. `}{s}
+              </div>
+              {active && <div style={{ height: 3, background: T.accent, borderRadius: 2, marginTop: 4 }} />}
+            </div>
+            {i < steps.length - 1 && <div style={{ color: T.fgSubtle, fontSize: 13 }}>/</div>}
+          </React.Fragment>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ---------- profile drawer ---------- */
+function ProfileDrawer({ open, onClose, patients, onAddPatient, onSignOut }) {
+  const { t } = useLang();
+  if (!open) return null;
+  return (
+    <div onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(38,70,83,0.35)", zIndex: 40 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{
+        position: "absolute", top: 0, right: 0, bottom: 0, width: "84%", maxWidth: 300,
+        background: T.surface, padding: 18, overflowY: "auto", boxShadow: "-4px 0 20px rgba(0,0,0,0.15)",
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
+          <Logo size={28} /><span style={{ fontWeight: 700, color: T.brandDeep, fontSize: 14 }}>Action Medical Institute</span>
+        </div>
+        <div style={{ textAlign: "center", marginBottom: 8 }}>
+          <div style={{ width: 60, height: 60, borderRadius: 999, background: T.brandSoft, color: T.brandDeep,
+            display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, fontWeight: 700, margin: "0 auto 8px" }}>
+            {patients[0]?.name?.[0] || "S"}</div>
+          <div style={{ fontWeight: 700, color: T.fg }}>{patients[0]?.name}</div>
+          <div style={{ color: T.fgMuted, fontSize: 13, ...tnum }}>+91 98102 34567</div>
+        </div>
+        <Label>Family details</Label>
+        {patients.map((p) => (
+          <Card key={p.id} style={{ marginBottom: 8, padding: 12 }}>
+            <div style={{ fontWeight: 600, color: T.fg }}>{p.name} <span style={{ fontWeight: 400, color: T.fgMuted, fontSize: 13 }}>· {p.relation}</span></div>
+            <div style={{ fontSize: 12, color: T.fgSubtle, ...tnum }}>UHID {p.uhid}</div>
+          </Card>
+        ))}
+        <div onClick={onAddPatient} style={{ border: `1.5px dashed ${T.brandDeep}`, borderRadius: RAD,
+          padding: 12, textAlign: "center", color: T.brandDeep, fontWeight: 600, fontSize: 14, cursor: "pointer", marginBottom: 16 }}>
+          + {t("addPatient")}
+        </div>
+        <Label>Support</Label>
+        <Card tone="brand" style={{ marginBottom: 16, padding: 14 }}>
+          <div style={{ fontWeight: 600, color: T.brandDeep }}>📞 Call SBAMI Support</div>
+          <div style={{ color: T.fgMuted, fontSize: 13, ...tnum }}>011-25264781</div>
+        </Card>
+        <GhostBtn color={T.error} onClick={onSignOut}>Sign out</GhostBtn>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- bottom modal (phone-constrained) ---------- */
+function Sheet({ open, onClose, title, children }) {
+  if (!open) return null;
+  return (
+    <div onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(38,70,83,0.4)", zIndex: 50, display: "flex", alignItems: "flex-end" }}>
+      <div onClick={(e) => e.stopPropagation()} style={{
+        width: "100%", maxHeight: "80%", overflowY: "auto", background: T.surface,
+        borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 18, boxSizing: "border-box",
+      }}>
+        {title && <div style={{ fontSize: 18, fontWeight: 700, color: T.fg, marginBottom: 14 }}>{title}</div>}
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/* ---------- header + phone shell ---------- */
+function Header({ title, onHome, onProfile, onBack, canBack, showLogo }) {
+  const { lang, toggle } = useLang();
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "12px 14px", background: T.bg }}>
+      {canBack && (
+        <button onClick={onBack} aria-label="Back" style={{ background: "none", border: "none", cursor: "pointer",
+          fontSize: 22, color: T.fg, lineHeight: 1, padding: "0 2px" }}>‹</button>
+      )}
+      <button onClick={onHome} aria-label="Home" style={{ background: "none", border: "none", cursor: "pointer", fontSize: 19, color: T.fgMuted }}>⌂</button>
+      <div style={{ flex: 1, textAlign: "center", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, minWidth: 0 }}>
+        {showLogo && <Logo size={26} />}
+        <span style={{ fontWeight: 700, fontSize: 16, color: showLogo ? T.brandDeep : T.fg, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{title}</span>
+      </div>
+      <button onClick={toggle} style={{ background: T.brandSoft, border: "none", borderRadius: 999, padding: "5px 10px",
+        fontSize: 12, fontWeight: 600, color: T.brandDeep, cursor: "pointer", fontFamily: "inherit" }}>
+        {lang === "en" ? "हिं" : "EN"}</button>
+      <button onClick={onProfile} style={{ width: 34, height: 34, borderRadius: 999, background: T.brandSoft,
+        color: T.brandDeep, border: "none", fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>S</button>
+    </div>
+  );
+}
+function BottomNav({ tab, onTab }) {
+  const items = [["home", "Home", "⌂"], ["bookings", "Bookings", "▤"], ["reports", "Reports", "▦"], ["profile", "Profile", "◔"]];
+  return (
+    <div style={{ display: "flex", borderTop: `1px solid ${T.border}`, background: T.surface }}>
+      {items.map(([k, label, ic]) => {
+        const active = tab === k;
+        return (
+          <button key={k} onClick={() => onTab(k)} style={{ flex: 1, background: "none", border: "none", cursor: "pointer",
+            padding: "10px 0 8px", color: active ? T.brandDeep : T.fgSubtle, fontFamily: "inherit" }}>
+            <div style={{ fontSize: 18 }}>{ic}</div>
+            <div style={{ fontSize: 11, fontWeight: active ? 600 : 400 }}>{label}</div>
+            {active && <div style={{ width: 4, height: 4, borderRadius: 999, background: T.accent, margin: "3px auto 0" }} />}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ======================= ONBOARDING ======================= */
+function LoginScreen({ onDone, onStaff }) {
+  const scenarioPrefill = BOOT_SCENARIO === "existing" ? EXISTING_PATIENT_MOBILE : "";
+  const [mobile, setMobile] = useState(scenarioPrefill);
+  const [otpSent, setOtp] = useState(false);
+  const [otp, setOtpVal] = useState("");
+  const demoLabel = BOOT_SCENARIO === "existing" ? "Demo build — Existing SBAMI patient"
+    : BOOT_SCENARIO === "new" ? "Demo build — New patient (first-time) registration" : null;
+  return (
+    <div style={{ padding: 24, display: "flex", flexDirection: "column", minHeight: "100%", justifyContent: "center" }}>
+      {demoLabel && (
+        <div style={{ position: "absolute", top: 36, left: 0, right: 0, textAlign: "center" }}>
+          <span style={{ background: T.accentSoft, color: T.accentStrong, fontSize: 11, fontWeight: 700,
+            borderRadius: 999, padding: "4px 12px", letterSpacing: 0.3 }}>{demoLabel}</span>
+        </div>
+      )}
+      <div style={{ textAlign: "center", marginBottom: 28 }}>
+        <div style={{ display: "flex", justifyContent: "center" }}><Logo size={88} /></div>
+        <div style={{ marginTop: 14 }}><Wordmark center /></div>
+        <div style={{ fontSize: 13, color: T.fgMuted, marginTop: 12 }}>Lab tests at home, reports on your phone</div>
+      </div>
+      {!otpSent ? (
+        <>
+          <Field label="Mobile number" value={mobile} onChange={(v) => setMobile(v.replace(/\D/g, "").slice(0, 10))} placeholder="10-digit mobile" numeric />
+          <AccentBtn disabled={mobile.length !== 10} reason="Enter a 10-digit number" onClick={() => setOtp(true)}>Send OTP</AccentBtn>
+          {!BOOT_SCENARIO && <div style={{ textAlign: "center", marginTop: 10, fontSize: 12, color: T.fgSubtle }}>Try 9810234567 (existing) or any other number (new)</div>}
+          {BOOT_SCENARIO === "existing" && <div style={{ textAlign: "center", marginTop: 10, fontSize: 12, color: T.fgSubtle }}>Number pre-filled for this demo — just tap Send OTP</div>}
+          {BOOT_SCENARIO === "new" && <div style={{ textAlign: "center", marginTop: 10, fontSize: 12, color: T.fgSubtle }}>Enter any 10-digit number — this demo always shows the new-patient flow</div>}
+          {onStaff && !BOOT_SCENARIO && <div style={{ textAlign: "center", marginTop: 18 }}><GhostBtn onClick={onStaff}>Staff login (Phlebotomist) →</GhostBtn></div>}
+        </>
+      ) : (
+        <>
+          <Field label="Enter OTP" value={otp} onChange={(v) => setOtpVal(v.replace(/\D/g, "").slice(0, 6))} placeholder="6-digit OTP" numeric note="Any 6 digits work in this demo" />
+          <AccentBtn disabled={otp.length !== 6} reason="Enter the 6-digit OTP" onClick={() => onDone(
+            BOOT_SCENARIO === "new" ? false : BOOT_SCENARIO === "existing" ? true : mobile === EXISTING_PATIENT_MOBILE
+          )}>Verify & continue</AccentBtn>
+        </>
+      )}
+    </div>
+  );
+}
+
+function ConsentScreen({ onAgree }) {
+  const [agree, setAgree] = useState(false);
+  return (
+    <Screen>
+      <div style={{ fontSize: 18, fontWeight: 700, color: T.fg, marginBottom: 12 }}>Privacy & Consent</div>
+      <Card tone="brand" style={{ marginBottom: 16 }}>
+        <div style={{ fontSize: 14, color: T.fg, lineHeight: 1.6 }}>
+          SBAMI will store your name, phone number, hospital ID, address, and test results to collect your
+          sample and deliver your reports. Your data is shared only with the SBAMI lab. You can ask us to
+          delete it at any time.
+        </div>
+      </Card>
+      <label style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 16, cursor: "pointer" }}>
+        <input type="checkbox" checked={agree} onChange={(e) => setAgree(e.target.checked)} style={{ width: 20, height: 20, accentColor: T.brand }} />
+        <span style={{ fontSize: 14, color: T.fg }}>I agree to the privacy terms</span>
+      </label>
+      <AccentBtn disabled={!agree} reason="Please agree to continue" onClick={onAgree}>Continue</AccentBtn>
+    </Screen>
+  );
+}
+
+/* new-patient form -> consent (the only Aadhaar branch) */
+function NewPatientScreen({ onCreated, firstTime }) {
+  const [f, setF] = useState({ name: "", age: "", gender: "", aadhaar: "" });
+  const set = (k) => (v) => setF({ ...f, [k]: v });
+  const valid = f.name && f.age && f.gender && f.aadhaar.replace(/\D/g, "").length === 12;
+  return (
+    <Screen>
+      {firstTime && (
+        <Card tone="brand" style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 14, color: T.fg }}>We couldn't find a record for this mobile number. Let's set up your profile — it only takes a minute.</div>
+        </Card>
+      )}
+      <div style={{ fontSize: 17, fontWeight: 700, color: T.fg, marginBottom: 4 }}>{firstTime ? "Tell us about you" : "Add patient"}</div>
+      <div style={{ fontSize: 13, color: T.fgMuted, marginBottom: 16 }}>We'll create a hospital ID so reports stay linked to {firstTime ? "you" : "this patient"}.</div>
+      <Field label="Full name" value={f.name} onChange={set("name")} placeholder="e.g. Vikram Anand" />
+      <Field label="Age" value={f.age} onChange={(v) => set("age")(v.replace(/\D/g, "").slice(0, 3))} placeholder="Age" numeric />
+      <div style={{ marginBottom: 12 }}>
+        <div style={{ fontSize: 13, color: T.fgMuted, marginBottom: 6, fontWeight: 500 }}>Gender</div>
+        <div style={{ display: "flex", gap: 8 }}>
+          {["Male", "Female", "Other"].map((g) => (
+            <button key={g} onClick={() => set("gender")(g)} style={{ flex: 1, minHeight: 46, borderRadius: RAD,
+              border: f.gender === g ? `2px solid ${T.brandDeep}` : `1px solid ${T.border}`,
+              background: f.gender === g ? T.brandSoft : T.surface, color: T.fg, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>{g}</button>
+          ))}
+        </div>
+      </div>
+      <Field label="Aadhaar number" value={f.aadhaar} onChange={(v) => set("aadhaar")(v.replace(/\D/g, "").slice(0, 12))} placeholder="12-digit Aadhaar" numeric
+        note="Used to create the hospital ID. Hidden immediately, never shown again." />
+      <Card tone="warning" style={{ marginBottom: 16, padding: 12 }}>
+        <div style={{ fontSize: 12, color: T.fg }}>Assumption A1 — Aadhaar collection under review with SBAMI. Only asked when no hospital ID can be recovered.</div>
+      </Card>
+      <AccentBtn disabled={!valid} reason="Fill all fields" onClick={() => onCreated({
+        id: "p" + uid(), name: f.name, uhid: (480000 + Math.floor(Math.random() * 20000)).toString(),
+        relation: firstTime ? "Self" : "Other", age: +f.age, gender: f.gender, sbami: false, hasRx: false })}>Create hospital ID</AccentBtn>
+    </Screen>
+  );
+}
+
+/* ======================= HOME ======================= */
+function HomeScreen({ patients, bookings, reports, onBook, onOpenBooking, onOpenReports }) {
+  const { t } = useLang();
+  const active = bookings.filter((b) => !["REPORT_READY", "CANCELLED"].includes(b.status));
+  return (
+    <Screen>
+      <div style={{ marginBottom: 16 }}>
+        <div style={{ fontSize: 12, color: T.fgMuted }}>SBAMI</div>
+        <div style={{ fontSize: 21, fontWeight: 700, color: T.fg }}>Good morning, {patients[0]?.name?.split(" ")[0]}</div>
+      </div>
+
+      {/* hero */}
+      <Card tone="brand" onClick={onBook} style={{ marginBottom: 16 }}>
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 18, fontWeight: 700, color: T.fg }}>{t("bookHome")}</div>
+            <div style={{ fontSize: 13, color: T.fgMuted, marginTop: 4 }}>{t("phleboComes")}</div>
+          </div>
+          <div style={{ width: 70, height: 70, borderRadius: 12, background: "rgba(42,157,143,0.15)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            <span style={{ fontSize: 34 }}>💉</span>
+          </div>
+        </div>
+        <div style={{ marginTop: 14 }}><AccentBtn onClick={onBook}>{t("bookTest")}</AccentBtn></div>
+      </Card>
+
+      {/* upcoming */}
+      <Label>{t("upcoming")}</Label>
+      {active.length === 0 ? (
+        <Card style={{ marginBottom: 16, textAlign: "center", color: T.fgMuted, fontSize: 14 }}>{t("noUpcoming")}</Card>
+      ) : active.map((b) => (
+        <Card key={b.id} onClick={() => onOpenBooking(b.id)} style={{ marginBottom: 10 }} tone={b.status === "ON_THE_WAY" ? "accent" : "success"}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 600, color: T.fg }}>{b.patientName} <span style={{ fontWeight: 400, color: T.fgMuted, fontSize: 12 }}>· {b.tests.length} test{b.tests.length > 1 ? "s" : ""}</span></div>
+              <div style={{ fontSize: 13, color: T.fgMuted, marginTop: 2 }}>{b.dateLabel} · {b.slot}</div>
+            </div>
+            <Pill tone={b.status === "ON_THE_WAY" ? "accent" : "success"}>{statusLabel(b.status)}</Pill>
+          </div>
+        </Card>
+      ))}
+
+      {/* reports */}
+      <Label>{t("reports")}</Label>
+      {reports.slice(0, 2).map((r) => (
+        <Card key={r.id} onClick={onOpenReports} style={{ marginBottom: 8, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div>
+            <div style={{ fontWeight: 600, color: T.fg, fontSize: 14 }}>{r.test}</div>
+            <div style={{ fontSize: 12, color: T.fgSubtle, ...tnum }}>{r.lab} · {r.date}</div>
+          </div>
+          {r.abnormal ? <Pill tone="warning">Needs attention</Pill> : <span style={{ color: T.brandDeep }}>⭳</span>}
+        </Card>
+      ))}
+      <GhostBtn onClick={onOpenReports}>See all reports →</GhostBtn>
+    </Screen>
+  );
+}
+
+/* ======================= PATIENT SELECT ======================= */
+function PatientSelect({ patients, onPick, onAdd }) {
+  const { t } = useLang();
+  const [sel, setSel] = useState(null);
+  return (
+    <Screen footer={
+      <AccentBtn disabled={!sel} reason="Select a patient above"
+        onClick={() => onPick(patients.find((p) => p.id === sel))}>
+        Book test for {sel ? patients.find((p) => p.id === sel).name.split(" ")[0] : ""}
+      </AccentBtn>
+    }>
+      {patients.map((p) => (
+        <Card key={p.id} onClick={() => setSel(p.id)} style={{ marginBottom: 10,
+          borderLeft: sel === p.id ? `3px solid ${T.brandDeep}` : "none",
+          background: sel === p.id ? T.brandSoft : T.surface }}>
+          <div style={{ fontWeight: 600, color: T.fg, fontSize: 16 }}>{p.name}</div>
+          <div style={{ fontSize: 13, color: T.fgMuted }}>{p.age} yrs · {p.gender} · {p.relation}</div>
+          <div style={{ fontSize: 12, color: T.fgSubtle, ...tnum }}>UHID {p.uhid}</div>
+        </Card>
+      ))}
+      <div onClick={onAdd} style={{ border: `1.5px dashed ${T.brandDeep}`, borderRadius: RAD, padding: 14,
+        textAlign: "center", color: T.brandDeep, fontWeight: 600, cursor: "pointer" }}>+ {t("addPatient")}</div>
+    </Screen>
+  );
+}
+
+/* ======================= TEST SELECT ======================= */
+function TestSelect({ step, patient, cart, setCart, onContinue }) {
+  const [q, setQ] = useState(""); const [cat, setCat] = useState("Popular");
+  const [showSheet, setShowSheet] = useState(false);
+  const [rxUpload, setRxUpload] = useState(null); // 'photo' | 'gallery' | null
+  const rxTests = useMemo(() => prescribedFor(patient), [patient]);
+  const hasRx = rxTests.length > 0;
+  const [showManual, setShowManual] = useState(!hasRx); // open by default when no Rx
+  const filtered = CATALOGUE.filter((x) =>
+    (q ? (x.en.toLowerCase().includes(q.toLowerCase()) || x.hi.includes(q)) : x.cat === cat));
+  const total = cart.reduce((s, c) => s + c.price, 0);
+  const inCart = (code) => cart.some((c) => c.code === code);
+  const toggle = (item) => setCart(inCart(item.code) ? cart.filter((c) => c.code !== item.code) : [...cart, item]);
+  const addAllRx = () => setCart([...cart.filter((c) => !rxTests.some((r) => r.code === c.code)), ...rxTests]);
+  return (
+    <Screen footer={
+      <>
+        {cart.length > 0 && (
+          <div onClick={() => setShowSheet(true)} style={{ display: "flex", justifyContent: "space-between",
+            cursor: "pointer", fontSize: 13, color: T.brandDeep, fontWeight: 600, marginBottom: 10 }}>
+            <span>🛒 {cart.length} test{cart.length > 1 ? "s" : ""} selected</span><span style={{ ...tnum }}>{rupee(total)} · View</span>
+          </div>
+        )}
+        <AccentBtn disabled={cart.length === 0} reason="Add at least one test" onClick={onContinue}>Continue to Date & Address</AccentBtn>
+      </>
+    }>
+      <Stepper step={step} />
+
+      {/* SOURCE 1 — prescription already in the system (SBAMI patients) */}
+      {hasRx && (
+        <Card tone="brand" style={{ marginBottom: 12 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: T.brandDeep }}>Your doctor's prescription</div>
+            <Pill tone="brand">From SBAMI</Pill>
+          </div>
+          <div style={{ fontSize: 12, color: T.fgMuted, marginTop: 4, display: "flex", gap: 12, flexWrap: "wrap" }}>
+            <span>📅 Prescribed <b style={{ color: T.fg }}>{patient.rxDate}</b></span>
+            {patient.rxDoctor && <span>🩺 {patient.rxDoctor}</span>}
+          </div>
+          <div style={{ fontSize: 13, color: T.fgMuted, margin: "6px 0 10px" }}>Pick the tests you want done.</div>
+          {rxTests.map((x) => (
+            <div key={x.code} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderTop: `1px solid ${T.brandSoft}` }}>
+              <div>
+                <div style={{ fontWeight: 600, color: T.fg, fontSize: 14 }}>{x.en}</div>
+                <div style={{ fontSize: 12, color: T.fgMuted, ...tnum }}>{rupee(x.price)}{x.fasting > 0 ? ` · ${x.fasting}h fasting` : ""}</div>
+              </div>
+              <button onClick={() => toggle(x)} style={{ borderRadius: 999,
+                background: inCart(x.code) ? T.brandDeep : T.surface, color: inCart(x.code) ? "#fff" : T.brandDeep,
+                border: inCart(x.code) ? "none" : `1px solid ${T.brand}`,
+                padding: "5px 14px", fontWeight: 600, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>
+                {inCart(x.code) ? "Added ✓" : "Add"}</button>
+            </div>
+          ))}
+          <div style={{ marginTop: 10 }}><GhostBtn onClick={addAllRx}>+ Add all prescribed tests</GhostBtn></div>
+        </Card>
+      )}
+
+      {/* SOURCE 2 — upload / photograph a prescription */}
+      <Card style={{ marginBottom: 12 }}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: T.fg }}>{hasRx ? "Have another prescription?" : "Have a prescription?"}</div>
+        <div style={{ fontSize: 13, color: T.fgMuted, margin: "2px 0 10px" }}>
+          {rxUpload ? "Our team will confirm the tests and price, usually within 30 minutes." : "Send us a photo or a digital copy. Our team reads it and confirms your tests."}
+        </div>
+        {!rxUpload ? (
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={() => setRxUpload("photo")} style={rxBtn}>📷 Take a photo</button>
+            <button onClick={() => setRxUpload("gallery")} style={rxBtn}>🖼 Upload from device</button>
+          </div>
+        ) : (
+          <Card tone="warning" style={{ padding: 12 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div style={{ fontSize: 13, color: T.fg }}>
+                {rxUpload === "photo" ? "📄 Prescription photo captured" : "📄 Prescription uploaded"}<br />
+                <span style={{ color: T.warning, fontWeight: 600 }}>Akash is reviewing it…</span>
+              </div>
+              <GhostBtn color={T.error} onClick={() => setRxUpload(null)}>Remove</GhostBtn>
+            </div>
+          </Card>
+        )}
+      </Card>
+
+      {/* SOURCE 3 — manual selection from the catalogue */}
+      <Card onClick={() => setShowManual((v) => !v)} style={{ marginBottom: showManual ? 12 : 0, cursor: "pointer" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: T.fg }}>Choose tests yourself</div>
+            <div style={{ fontSize: 13, color: T.fgMuted }}>Search or browse the full test list</div>
+          </div>
+          <span style={{ color: T.fgMuted, fontSize: 18 }}>{showManual ? "▴" : "▾"}</span>
+        </div>
+      </Card>
+
+      {showManual && <>
+      <Field value={q} onChange={setQ} placeholder="Search — CBC, Lipid Profile, Thyroid…" />
+      <div style={{ display: "flex", gap: 8, overflowX: "auto", padding: "4px 0 12px" }}>
+        {CATS.map((c) => (
+          <button key={c} onClick={() => { setCat(c); setQ(""); }} style={{ whiteSpace: "nowrap", borderRadius: 999,
+            border: cat === c && !q ? "none" : `1px solid ${T.border}`, background: cat === c && !q ? T.brandDeep : T.surface,
+            color: cat === c && !q ? "#fff" : T.fg, padding: "6px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>{c}</button>
+        ))}
+      </div>
+      {filtered.map((x) => (
+        <Card key={x.code} style={{ marginBottom: 10 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 600, color: T.fg }}>{x.en}</div>
+              <div style={{ fontSize: 12, color: T.fgMuted }}>{x.hi}</div>
+              <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
+                <Pill>{x.vial.split(" ")[0]}</Pill>
+                {x.fasting > 0 ? <Pill tone="warning">{x.fasting}h fasting</Pill> : <Pill tone="success">No fasting</Pill>}
+                <Pill>Report {x.tat}h</Pill>
+              </div>
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <div style={{ fontWeight: 700, color: T.fg, ...tnum }}>{rupee(x.price)}</div>
+              <button onClick={() => toggle(x)} style={{ marginTop: 6, borderRadius: 999, border: "none",
+                background: inCart(x.code) ? T.brandDeep : T.accentSoft, color: inCart(x.code) ? "#fff" : T.accentStrong,
+                padding: "5px 14px", fontWeight: 600, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>
+                {inCart(x.code) ? "Added ✓" : "Add"}</button>
+            </div>
+          </div>
+        </Card>
+      ))}
+      </>}
+      <Sheet open={showSheet} onClose={() => setShowSheet(false)} title="Your cart">
+        {cart.map((c) => (
+          <div key={c.code} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: `1px solid ${T.border}` }}>
+            <span style={{ color: T.fg }}>{c.en}</span>
+            <span style={{ display: "flex", gap: 10, ...tnum }}>{rupee(c.price)}
+              <span onClick={() => toggle(c)} style={{ color: T.error, cursor: "pointer" }}>✕</span></span>
+          </div>
+        ))}
+        <div style={{ display: "flex", justifyContent: "space-between", marginTop: 12, fontWeight: 700, color: T.fg, ...tnum }}>
+          <span>Total</span><span>{rupee(total)}</span></div>
+      </Sheet>
+    </Screen>
+  );
+}
+
+/* Screen: scrollable content area + optional fixed footer.
+   Content scrolls only when it overflows; footer stays pinned. */
+function Screen({ children, footer, pad = 18 }) {
+  return (
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
+      <div style={{ flex: 1, overflowY: "auto", minHeight: 0, padding: pad, boxSizing: "border-box" }}>
+        {children}
+      </div>
+      {footer && (
+        <div style={{ flexShrink: 0, background: T.surface, borderTop: `1px solid ${T.border}`, padding: 14 }}>
+          {footer}
+        </div>
+      )}
+    </div>
+  );
+}
+function statusLabel(s) {
+  return ({ CONFIRMED: "Confirmed", PHLEBO_ASSIGNED: "Phlebo assigned", ON_THE_WAY: "On the way",
+    COLLECTED: "Collected", RECEIVED_AT_LAB: "At lab", REPORT_READY: "Report ready",
+    RESCHEDULE_PENDING_PATIENT: "Reschedule needed", CANCELLED: "Cancelled" })[s] || s;
+}
+
+/* ======================= SCHEDULE (address + slot) ======================= */
+function ScheduleScreen({ step, cart, draft, setDraft, onContinue }) {
+  const [addr, setAddr] = useState(draft.address || "");
+  const [landmark, setLandmark] = useState(draft.landmark || "");
+  const [sugs, setSugs] = useState([]);
+  const [km, setKm] = useState(draft.km || null);
+  const [date, setDate] = useState(draft.date || null);
+  const [slot, setSlot] = useState(draft.slot || null);
+  const days = useMemo(() => nextDays(3), []);
+  const total = cart.reduce((s, c) => s + c.price, 0);
+  const hasFasting = cart.some((c) => c.fasting > 0);
+
+  const onAddr = (v) => {
+    setAddr(v);
+    setSugs(v.length > 1 ? LOCALITIES.filter((l) => l.name.toLowerCase().includes(v.toLowerCase())).slice(0, 4) : []);
+  };
+  const pick = (l) => { setAddr(l.name); setKm(l.km); setSugs([]); };
+
+  const ready = addr && landmark && date && slot;
+  return (
+    <Screen footer={
+      <AccentBtn disabled={!ready} reason={!addr || !landmark ? "Enter address & landmark" : !date ? "Pick a date" : "Pick a time slot"}
+        onClick={() => { setDraft({ ...draft, address: addr, landmark, km, date, dateLabel: date.label, slot }); onContinue(); }}>Review booking</AccentBtn>
+    }>
+      <Stepper step={step} />
+      <Label>Where should we come?</Label>
+      <div style={{ height: 150, borderRadius: RAD, background: `linear-gradient(135deg,${T.brandSoft},${T.infoSoft})`,
+        display: "flex", alignItems: "center", justifyContent: "center", position: "relative", marginBottom: 10 }}>
+        <span style={{ fontSize: 40 }}>📍</span>
+        <button onClick={() => pick(LOCALITIES[0])} style={{ position: "absolute", bottom: 8, left: 8, background: T.surface,
+          border: "none", borderRadius: RAD, padding: "6px 10px", fontSize: 12, fontWeight: 600, color: T.brandDeep, cursor: "pointer", fontFamily: "inherit" }}>
+          📍 Use my current location</button>
+      </div>
+      <div style={{ position: "relative" }}>
+        <Field value={addr} onChange={onAddr} placeholder="Type your address…" />
+        {sugs.length > 0 && (
+          <div style={{ position: "absolute", top: 52, left: 0, right: 0, background: T.surface, borderRadius: RAD,
+            boxShadow: "0 4px 16px rgba(0,0,0,0.12)", zIndex: 10, overflow: "hidden" }}>
+            {sugs.map((l) => (
+              <div key={l.name} onClick={() => pick(l)} style={{ padding: "10px 14px", cursor: "pointer", fontSize: 14, color: T.fg, borderBottom: `1px solid ${T.border}` }}>
+                📍 {l.name} <span style={{ color: T.fgSubtle, fontSize: 12 }}>· {l.km} km</span></div>
+            ))}
+          </div>
+        )}
+      </div>
+      <Field value={landmark} onChange={setLandmark} placeholder="Landmark (required)" note="Our phlebotomist finds the house by landmark — please be specific." />
+      {km != null && <div style={{ marginBottom: 10 }}><Pill tone="info">{km} km from SBAMI</Pill></div>}
+
+      <Label>When should we come?</Label>
+      <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+        {days.map((d) => (
+          <button key={d.key} onClick={() => setDate(d)} style={{ flex: 1, minHeight: 52, borderRadius: RAD,
+            border: date?.key === d.key ? `2px solid ${T.brandDeep}` : `1px solid ${T.border}`,
+            background: date?.key === d.key ? T.brandSoft : T.surface, color: T.fg, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>{d.label}</button>
+        ))}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+        {SLOTS.map((s, i) => {
+          const morning = i < 2; const full = i === 4;
+          return (
+            <button key={s} disabled={full} onClick={() => setSlot(s)} style={{ minHeight: 56, borderRadius: RAD,
+              border: slot === s ? `2px solid ${T.brandDeep}` : `1px solid ${T.border}`,
+              background: full ? T.sunken : slot === s ? T.brandSoft : T.surface, color: full ? T.fgSubtle : T.fg,
+              fontSize: 13, fontWeight: 600, cursor: full ? "not-allowed" : "pointer", fontFamily: "inherit", ...tnum }}>
+              {s}{full ? " · Full" : ""}
+              {hasFasting && morning && <div style={{ fontSize: 10, color: T.accentStrong, fontWeight: 600 }}>Best for fasting</div>}
+            </button>
+          );
+        })}
+      </div>
+    </Screen>
+  );
+}
+
+/* ======================= REVIEW ======================= */
+function ReviewScreen({ step, patient, cart, draft, onEdit, onPay }) {
+  const [readPrep, setReadPrep] = useState(false);
+  const total = cart.reduce((s, c) => s + c.price, 0);
+  const fasting = Math.max(0, ...cart.map((c) => c.fasting));
+  return (
+    <Screen footer={
+      <AccentBtn disabled={!readPrep} reason="Confirm you've read the prep instructions" onClick={onPay}>Continue to payment · {rupee(total)}</AccentBtn>
+    }>
+      <Stepper step={step} />
+      <Card style={{ marginBottom: 12 }}>
+        <div style={{ display: "flex", justifyContent: "space-between" }}>
+          <div><Label>Patient</Label>
+            <div style={{ fontWeight: 600, color: T.fg }}>{patient.name}</div>
+            <div style={{ fontSize: 12, color: T.fgSubtle, ...tnum }}>UHID {patient.uhid} · {patient.relation}</div></div>
+          <GhostBtn onClick={() => onEdit("patient")}>Edit</GhostBtn>
+        </div>
+      </Card>
+      <Card style={{ marginBottom: 12 }}>
+        <div style={{ display: "flex", justifyContent: "space-between" }}><Label>Tests</Label><GhostBtn onClick={() => onEdit("tests")}>Edit</GhostBtn></div>
+        {cart.map((c) => (
+          <div key={c.code} style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", color: T.fg, fontSize: 14 }}>
+            <span>{c.en}</span><span style={{ ...tnum }}>{rupee(c.price)}</span></div>
+        ))}
+        <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8, paddingTop: 8, borderTop: `1px solid ${T.border}`, fontWeight: 700, color: T.fg, ...tnum }}>
+          <span>Total</span><span style={{ fontSize: 18 }}>{rupee(total)}</span></div>
+      </Card>
+      <Card style={{ marginBottom: 12 }}>
+        <div style={{ display: "flex", justifyContent: "space-between" }}><Label>Date, time & address</Label><GhostBtn onClick={() => onEdit("schedule")}>Edit</GhostBtn></div>
+        <div style={{ color: T.fg, fontWeight: 600 }}>{draft.dateLabel} · {draft.slot}</div>
+        <div style={{ fontSize: 13, color: T.fgMuted, marginTop: 2 }}><b>{draft.landmark}</b>, {draft.address}</div>
+      </Card>
+      <Card tone={fasting > 0 ? "warning" : "success"} style={{ marginBottom: 12 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div style={{ fontWeight: 700, color: T.fg }}>Prepare for your test</div>
+          <span style={{ fontSize: 20 }}>🕐</span>
+        </div>
+        {fasting > 0 ? (
+          <div style={{ color: T.warning, fontWeight: 600, marginTop: 8, fontSize: 14 }}>Do not eat or drink except water after 10:00 PM tonight ({fasting} hours fasting).</div>
+        ) : (
+          <div style={{ color: T.success, fontWeight: 600, marginTop: 8, fontSize: 14 }}>No fasting required. You can eat and drink normally.</div>
+        )}
+        <div style={{ fontSize: 13, color: T.fgMuted, marginTop: 8 }}>• Keep your prescription and a photo ID ready.<br />• Drink a glass of water 30 min before — it makes the draw easier.</div>
+        <label style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 12, cursor: "pointer" }}>
+          <input type="checkbox" checked={readPrep} onChange={(e) => setReadPrep(e.target.checked)} style={{ width: 18, height: 18, accentColor: T.brand }} />
+          <span style={{ fontSize: 13, color: T.fg }}>I've read the preparation instructions</span></label>
+      </Card>
+    </Screen>
+  );
+}
+
+/* ======================= PAYMENT (method select + 3 flows) ======================= */
+function PaymentSelect({ amount, onUPI, onCard, onCash }) {
+  const [method, setMethod] = useState(null);
+  const OPTS = [
+    { k: "UPI", icon: "▦", tint: T.brand, bg: T.brandSoft, title: "UPI Payment", sub: "Pay instantly via UPI QR code" },
+    { k: "CARD", icon: "💳", tint: T.info, bg: T.infoSoft, title: "Debit / Credit Card", sub: "Pay via secure card gateway" },
+    { k: "CASH", icon: "💵", tint: T.success, bg: T.successSoft, title: "Cash on Collection", sub: "Pay our phlebotomist at your door" },
+  ];
+  const go = () => { if (method === "UPI") onUPI(); else if (method === "CARD") onCard(); else if (method === "CASH") onCash(); };
+  const labels = { UPI: `Pay ${rupee(amount)} via UPI`, CARD: "Enter Card Details", CASH: "Confirm Booking · Pay at Door" };
+  return (
+    <Screen footer={
+      <AccentBtn disabled={!method} reason="Select a payment method above" onClick={go}>{method ? labels[method] : "Select a payment method"}</AccentBtn>
+    }>
+      <Label>Select payment method</Label>
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        {OPTS.map((o) => (
+          <Card key={o.k} onClick={() => setMethod(o.k)} style={{ padding: 14,
+            borderLeft: "none", border: method === o.k ? `2px solid ${T.brandDeep}` : `1px solid ${T.border}`,
+            background: method === o.k ? T.brandSoft : T.surface }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+              <div style={{ width: 44, height: 44, borderRadius: 999, background: o.bg, color: o.tint,
+                display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, flexShrink: 0 }}>{o.icon}</div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 600, color: T.fg, fontSize: 15 }}>{o.title}</div>
+                <div style={{ fontSize: 13, color: T.fgMuted }}>{o.sub}</div>
+              </div>
+              <div style={{ width: 20, height: 20, borderRadius: 999, border: `2px solid ${method === o.k ? T.brandDeep : T.fgSubtle}`,
+                background: method === o.k ? T.brandDeep : "transparent" }} />
+            </div>
+          </Card>
+        ))}
+      </div>
+      {method === "CASH" && <Card tone="warning" style={{ marginTop: 12, fontSize: 13, color: T.fg }}>
+        Our phlebotomist will collect {rupee(amount)} at your door and issue a digital receipt.</Card>}
+    </Screen>
+  );
+}
+
+function UpiPayScreen({ amount, bookingCode, onPaid }) {
+  return (
+    <Screen>
+      <Card tone="brand" style={{ marginBottom: 16, textAlign: "center" }}>
+        <div style={{ fontSize: 13, color: T.fgMuted }}>Amount to pay</div>
+        <div style={{ fontSize: 32, fontWeight: 700, color: T.brandDeep, ...tnum }}>{rupee(amount)}</div>
+        <div style={{ fontSize: 12, color: T.fgSubtle, ...tnum }}>Booking {bookingCode}</div>
+      </Card>
+      <Card style={{ textAlign: "center", marginBottom: 16 }}>
+        <div style={{ width: 180, height: 180, margin: "0 auto", background: "#fff", borderRadius: 12,
+          display: "grid", gridTemplateColumns: "repeat(11,1fr)", gap: 1, padding: 8, boxSizing: "border-box" }}>
+          {Array.from({ length: 121 }).map((_, i) => (
+            <div key={i} style={{ background: (i * 7 + (i % 5) + Math.floor(i / 11)) % 3 === 0 ? T.fg : "transparent", borderRadius: 1 }} />
+          ))}
+        </div>
+        <div style={{ fontSize: 13, color: T.fgMuted, marginTop: 10 }}>Scan with any UPI app</div>
+        <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 8 }}>
+          {["GPay", "PhonePe", "Paytm"].map((a) => <Pill key={a}>{a}</Pill>)}
+        </div>
+      </Card>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "center", marginBottom: 16, color: T.fgMuted, fontSize: 13 }}>
+        <span style={{ width: 8, height: 8, borderRadius: 999, background: T.warning }} /> Waiting for payment…</div>
+      <AccentBtn onClick={onPaid}>Simulate payment ✓</AccentBtn>
+    </Screen>
+  );
+}
+
+function CardPayScreen({ amount, onPaid }) {
+  const [f, setF] = useState({ num: "", name: "", exp: "", cvv: "" });
+  const [loading, setLoading] = useState(false);
+  const valid = f.num.replace(/\s/g, "").length === 16 && f.name && f.exp.length === 5 && f.cvv.length >= 3;
+  const fmtNum = (v) => v.replace(/\D/g, "").slice(0, 16).replace(/(.{4})/g, "$1 ").trim();
+  const fmtExp = (v) => { const d = v.replace(/\D/g, "").slice(0, 4); return d.length > 2 ? d.slice(0, 2) + "/" + d.slice(2) : d; };
+  return (
+    <Screen>
+      <Card tone="brand" style={{ marginBottom: 16, textAlign: "center" }}>
+        <div style={{ fontSize: 13, color: T.fgMuted }}>Amount to pay</div>
+        <div style={{ fontSize: 32, fontWeight: 700, color: T.brandDeep, ...tnum }}>{rupee(amount)}</div>
+      </Card>
+      <Field label="Card number" value={f.num} onChange={(v) => setF({ ...f, num: fmtNum(v) })} placeholder="4242 4242 4242 4242" numeric />
+      <Field label="Cardholder name" value={f.name} onChange={(v) => setF({ ...f, name: v.toUpperCase() })} placeholder="NAME ON CARD" />
+      <div style={{ display: "flex", gap: 10 }}>
+        <div style={{ flex: 1 }}><Field label="Expiry" value={f.exp} onChange={(v) => setF({ ...f, exp: fmtExp(v) })} placeholder="MM/YY" numeric /></div>
+        <div style={{ flex: 1 }}><Field label="CVV" value={f.cvv} onChange={(v) => setF({ ...f, cvv: v.replace(/\D/g, "").slice(0, 4) })} placeholder="•••" numeric /></div>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, color: T.success, fontSize: 13, marginBottom: 16 }}>🛡 Secured by 256-bit encryption</div>
+      <AccentBtn disabled={!valid || loading} reason="Fill in all card details"
+        onClick={() => { setLoading(true); setTimeout(onPaid, 1800); }}>{loading ? "Processing…" : `Pay ${rupee(amount)}`}</AccentBtn>
+    </Screen>
+  );
+}
+
+/* ======================= CONFIRMATION + TIMELINE ======================= */
+const TIMELINE = [
+  ["CONFIRMED", "Confirmed", "Your booking is confirmed"],
+  ["PHLEBO_ASSIGNED", "Phlebotomist assigned", "Akash Kumar will collect your sample"],
+  ["ON_THE_WAY", "On the way", "Akash is on the way"],
+  ["COLLECTED", "Sample collected", "Your sample has been collected"],
+  ["RECEIVED_AT_LAB", "Received at lab", "Your sample reached SBAMI's lab"],
+  ["REPORT_READY", "Report ready", "Your report is ready to view"],
+];
+function statusIndex(s) { return TIMELINE.findIndex((x) => x[0] === s); }
+
+function ConfirmScreen({ booking, onAdvance, onReschedule, onCancel, onViewReport }) {
+  const idx = statusIndex(booking.status);
+  const payCard = {
+    PAID_ONLINE: ["success", `Payment confirmed — ${rupee(booking.amount)}`],
+    PAY_ON_COLLECTION: ["warning", `${rupee(booking.amount)} to be paid at your door`],
+    PRE_BILLED: ["success", `Already paid at the hospital`],
+  }[booking.paymentState] || ["success", "Confirmed"];
+  return (
+    <Screen>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}><Logo size={24} />
+        <span style={{ fontSize: 13, fontWeight: 600, color: T.brandDeep }}>Action Medical Institute</span></div>
+      <div style={{ fontSize: 26, fontWeight: 700, color: T.brandDeep, ...tnum }}>{booking.code}</div>
+      <div style={{ color: T.fgMuted, fontSize: 14, marginBottom: 4 }}>{booking.patientName} · {booking.dateLabel} · {booking.slot}</div>
+      <div style={{ fontSize: 13, color: T.fgMuted, marginBottom: 14 }}><b>{booking.landmark}</b>, {booking.address}</div>
+
+      <Card tone={payCard[0]} style={{ marginBottom: 16 }}>
+        <div style={{ fontWeight: 600, color: T.fg, ...tnum }}>{payCard[1]}</div>
+      </Card>
+
+      {booking.status === "RESCHEDULE_PENDING_PATIENT" && (
+        <Card tone="accent" style={{ marginBottom: 16 }}>
+          <div style={{ fontWeight: 600, color: T.fg }}>Akash needs to move your visit</div>
+          <div style={{ fontSize: 13, color: T.fgMuted, margin: "4px 0 10px" }}>Proposed: {booking.slot}. Reason: an emergency collection.</div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <AccentBtn onClick={() => onAdvance("CONFIRMED")}>Accept new slot</AccentBtn>
+          </div>
+        </Card>
+      )}
+
+      {/* timeline */}
+      <Card style={{ marginBottom: 16 }}>
+        {TIMELINE.map((t, i) => {
+          const done = i < idx, current = i === idx;
+          return (
+            <div key={t[0]} style={{ display: "flex", gap: 12, alignItems: "flex-start", paddingBottom: i < TIMELINE.length - 1 ? 16 : 0, position: "relative" }}>
+              {i < TIMELINE.length - 1 && <div style={{ position: "absolute", left: 9, top: 20, bottom: 0, width: 2, background: done ? T.success : T.border }} />}
+              <div style={{ width: 20, height: 20, borderRadius: 999, flexShrink: 0, zIndex: 1,
+                background: done ? T.success : current ? T.brand : T.surface,
+                border: done || current ? "none" : `2px solid ${T.fgSubtle}`,
+                display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 12 }}>{done ? "✓" : ""}</div>
+              <div>
+                <div style={{ fontWeight: current ? 700 : 600, color: done || current ? T.fg : T.fgSubtle, fontSize: 14 }}>{t[1]}</div>
+                <div style={{ fontSize: 12, color: T.fgMuted }}>{t[2]}</div>
+                {current && i === 2 && (
+                  <div style={{ marginTop: 8, height: 90, borderRadius: 12, background: `linear-gradient(135deg,${T.brandSoft},${T.infoSoft})`,
+                    display: "flex", alignItems: "center", justifyContent: "center", color: T.brandDeep, fontWeight: 600, position: "relative" }}>
+                    🚗 Akash is 12 minutes away
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </Card>
+
+      {/* demo advance */}
+      {idx >= 0 && idx < TIMELINE.length - 1 && (
+        <div style={{ marginBottom: 12 }}>
+          <PrimaryBtn onClick={() => onAdvance(TIMELINE[idx + 1][0])}>▶ Advance status (demo): {TIMELINE[idx + 1][1]}</PrimaryBtn>
+        </div>
+      )}
+      {booking.status === "REPORT_READY" && <div style={{ marginBottom: 12 }}><AccentBtn onClick={onViewReport}>View report</AccentBtn></div>}
+
+      {idx < 3 && booking.status !== "RESCHEDULE_PENDING_PATIENT" && (
+        <div style={{ display: "flex", gap: 8 }}>
+          <div style={{ flex: 1 }}><OutlineBtn onClick={onReschedule}>Reschedule</OutlineBtn></div>
+          <div style={{ flex: 1 }}><OutlineBtn color={T.error} text={T.error} onClick={onCancel}>Cancel</OutlineBtn></div>
+        </div>
+      )}
+    </Screen>
+  );
+}
+
+/* ======================= REPORTS ======================= */
+function ReportsScreen({ patients, reports, onOpen }) {
+  const [filter, setFilter] = useState("all");
+  const list = filter === "all" ? reports : reports.filter((r) => r.patientId === filter);
+  return (
+    <Screen>
+      <div style={{ display: "flex", gap: 8, overflowX: "auto", marginBottom: 14 }}>
+        <button onClick={() => setFilter("all")} style={chip(filter === "all")}>All patients</button>
+        {patients.map((p) => <button key={p.id} onClick={() => setFilter(p.id)} style={chip(filter === p.id)}>{p.name.split(" ")[0]}</button>)}
+      </div>
+      {list.length === 0 && <Card style={{ textAlign: "center", color: T.fgMuted }}>No reports yet</Card>}
+      {list.map((r) => (
+        <Card key={r.id} onClick={() => onOpen(r)} style={{ marginBottom: 10, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div>
+            <div style={{ fontWeight: 600, color: T.fg }}>{r.test}</div>
+            <div style={{ fontSize: 12, color: T.fgSubtle, ...tnum }}>{r.lab} · {r.date}</div>
+          </div>
+          {r.abnormal ? <Pill tone="warning">Needs attention</Pill> : <Pill tone="success">Ready</Pill>}
+        </Card>
+      ))}
+    </Screen>
+  );
+}
+function ReportViewer({ report, patient }) {
+  return (
+    <Screen>
+      <Card style={{ marginBottom: 12 }}>
+        <div style={{ fontWeight: 700, color: T.fg }}>{report.test}</div>
+        <div style={{ fontSize: 13, color: T.fgMuted, ...tnum }}>{patient?.name} · UHID {patient?.uhid}</div>
+        <div style={{ fontSize: 12, color: T.fgSubtle, ...tnum }}>{report.lab} · {report.date}</div>
+      </Card>
+      {report.abnormal && <Card tone="warning" style={{ marginBottom: 12, fontSize: 13, color: T.fg }}>
+        Some values are outside the normal range. Please discuss this report with your doctor.</Card>}
+      <Card style={{ marginBottom: 12, minHeight: 260, background: "#fff" }}>
+        <div style={{ textAlign: "center", color: T.fgSubtle, paddingTop: 90 }}>📄<br />Report PDF preview<br /><span style={{ fontSize: 11 }}>(fetched from Akhil LIS by UHID + lab number)</span></div>
+      </Card>
+      <div style={{ display: "flex", gap: 8 }}>
+        {["⭳ Download", "WhatsApp", "Share"].map((a) => <div key={a} style={{ flex: 1 }}><OutlineBtn color={T.brandSoft} text={T.brandDeep}>{a}</OutlineBtn></div>)}
+      </div>
+    </Screen>
+  );
+}
+const chip = (active) => ({ whiteSpace: "nowrap", borderRadius: 999, border: active ? "none" : `1px solid ${T.border}`,
+  background: active ? T.brandDeep : T.surface, color: active ? "#fff" : T.fg, padding: "6px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" });
+const rxBtn = { flex: 1, minHeight: 60, borderRadius: RAD, border: `1px solid ${T.border}`, background: T.sunken,
+  color: T.fg, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" };
+
+/* ======================= APP SHELL ======================= */
+
+/* ============================================================
+   PHLEBOTOMIST APP — separate role, separate screens
+   ============================================================ */
+
+/* seed visits for the phlebo's day */
+const PHLEBO = { name: "Akash Kumar", id: "ph1", mobile: "9811055221" };
+/* day: 0 = today, 1 = tomorrow, 2 = day after — drives the 3-day schedule view */
+const SEED_VISITS = [
+  { id: "v1", code: "SB-1001", day: 0, patient: "Sunita Sharma", uhid: "10024871", age: 62, gender: "F",
+    locality: "A-4 Block, Paschim Vihar", km: 0.8, slot: "08:00–10:00 AM",
+    tests: [{ en: "Complete Blood Count", vial: "EDTA (lavender)", n: 1 }, { en: "Lipid Profile", vial: "SST (gold)", n: 1 }],
+    fasting: 12, pay: "PAID_ONLINE", amount: 1050, status: "PENDING", priority: false, phone: "98102 34567" },
+  { id: "v2", code: "SB-1002", day: 0, patient: "Vikram Anand", uhid: "480533", age: 59, gender: "M",
+    locality: "Rajouri Garden", km: 4.2, slot: "08:00–10:00 AM",
+    tests: [{ en: "HbA1c", vial: "EDTA (lavender)", n: 1 }, { en: "Fasting Blood Sugar", vial: "Fluoride (grey)", n: 1 }],
+    fasting: 10, pay: "TO_COLLECT", amount: 670, status: "PENDING", priority: false, phone: "98910 11223" },
+  { id: "v3", code: "SB-0998", day: 0, patient: "Rekha Gupta", uhid: "471200", age: 45, gender: "F",
+    locality: "Punjabi Bagh", km: 3.6, slot: "10:00–12:00 PM",
+    tests: [{ en: "Thyroid Profile", vial: "SST (gold)", n: 1 }],
+    fasting: 0, pay: "PRE_BILLED", amount: 600, status: "PENDING", priority: true, priorityReason: "Recollection — sample clotted", phone: "98730 44556" },
+  { id: "v4", code: "SB-1010", day: 1, patient: "Meena Kapoor", uhid: "462981", age: 51, gender: "F",
+    locality: "Peeragarhi", km: 2.4, slot: "08:00–10:00 AM",
+    tests: [{ en: "Complete Blood Count", vial: "EDTA (lavender)", n: 1 }],
+    fasting: 0, pay: "PAID_ONLINE", amount: 350, status: "PENDING", priority: false, phone: "98220 55671" },
+  { id: "v5", code: "SB-1011", day: 1, patient: "Arjun Malhotra", uhid: "455102", age: 34, gender: "M",
+    locality: "Janakpuri", km: 5.8, slot: "10:00–12:00 PM",
+    tests: [{ en: "Liver Function Test", vial: "SST (gold)", n: 1 }, { en: "Kidney Function Test", vial: "SST (gold)", n: 1 }],
+    fasting: 8, pay: "TO_COLLECT", amount: 1300, status: "PENDING", priority: false, phone: "98110 22334" },
+  { id: "v6", code: "SB-1015", day: 2, patient: "Kavita Reddy", uhid: "441870", age: 67, gender: "F",
+    locality: "Nangloi", km: 6.9, slot: "12:00–02:00 PM",
+    tests: [{ en: "HbA1c", vial: "EDTA (lavender)", n: 1 }, { en: "Vitamin D", vial: "SST (gold)", n: 1 }],
+    fasting: 0, pay: "PRE_BILLED", amount: 1750, status: "PENDING", priority: false, phone: "98730 99881" },
+  { id: "v7", code: "SB-1016", day: 2, patient: "Rohit Sen", uhid: "438220", age: 29, gender: "M",
+    locality: "Uttam Nagar", km: 7.8, slot: "08:00–10:00 AM",
+    tests: [{ en: "Dengue NS1", vial: "SST (gold)", n: 1 }],
+    fasting: 0, pay: "PAID_ONLINE", amount: 800, status: "PENDING", priority: false, phone: "98910 44002" },
+];
+const SCHEDULE_DAYS = [
+  { key: 0, label: "Today", date: "Thu 16 Jul" },
+  { key: 1, label: "Tomorrow", date: "Fri 17 Jul" },
+  { key: 2, label: "Day after", date: "Sat 18 Jul" },
+];
+const SEED_RXQUEUE = [
+  { id: "q1", patient: "Anil Verma", mobile: "98700 12345", waiting: 8, status: "New" },
+  { id: "q2", patient: "Meena Joshi", mobile: "98220 66789", waiting: 42, status: "New" },
+  { id: "q3", patient: "Sanjay Roy", mobile: "98110 99001", waiting: 15, status: "Escalated to senior" },
+];
+
+const payChip = (p) => ({ PAID_ONLINE: ["success", "Paid online"], PRE_BILLED: ["success", "Pre-billed"], TO_COLLECT: ["warning", "To collect"] }[p] || ["neutral", p]);
+
+/* ---------- phlebo header + bottom nav ---------- */
+function PhleboHeader({ title, sync = "Online" }) {
+  const { lang, toggle } = useLang();
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "12px 16px", background: T.brandDeep }}>
+      <div style={{ flex: 1 }}>
+        <div style={{ color: "#fff", fontWeight: 700, fontSize: 15 }}>{title}</div>
+        <div style={{ color: "rgba(255,255,255,0.7)", fontSize: 11 }}>{PHLEBO.name} · Thu 16 Jul</div>
+      </div>
+      <span style={{ background: "rgba(255,255,255,0.18)", color: "#fff", borderRadius: 999, padding: "3px 10px", fontSize: 11, fontWeight: 600 }}>
+        {sync === "Online" ? "● Online" : "◌ " + sync}</span>
+      <button onClick={toggle} style={{ background: "rgba(255,255,255,0.18)", border: "none", borderRadius: 999, padding: "4px 9px",
+        fontSize: 12, fontWeight: 600, color: "#fff", cursor: "pointer", fontFamily: "inherit" }}>{lang === "en" ? "हिं" : "EN"}</button>
+    </div>
+  );
+}
+function PhleboNav({ tab, onTab, queueCount }) {
+  const items = [["today", "Today", "☰"], ["queue", "Queue", "▤"], ["handover", "Handover", "⇄"], ["me", "Me", "◔"]];
+  return (
+    <div style={{ display: "flex", borderTop: `1px solid ${T.border}`, background: T.surface }}>
+      {items.map(([k, label, ic]) => {
+        const active = tab === k;
+        return (
+          <button key={k} onClick={() => onTab(k)} style={{ flex: 1, background: "none", border: "none", cursor: "pointer",
+            padding: "10px 0 8px", color: active ? T.brandDeep : T.fgSubtle, fontFamily: "inherit", position: "relative" }}>
+            <div style={{ fontSize: 17 }}>{ic}</div>
+            <div style={{ fontSize: 11, fontWeight: active ? 600 : 400 }}>{label}</div>
+            {k === "queue" && queueCount > 0 && <span style={{ position: "absolute", top: 6, right: "50%", marginRight: -18,
+              background: T.accent, color: T.fg, borderRadius: 999, fontSize: 10, fontWeight: 700, padding: "1px 5px" }}>{queueCount}</span>}
+            {active && <div style={{ width: 4, height: 4, borderRadius: 999, background: T.accent, margin: "3px auto 0" }} />}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ---------- TODAY (+ next 2 days) ---------- */
+function DaySelector({ selectedDay, onSelectDay, countFor }) {
+  return (
+    <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+      {SCHEDULE_DAYS.map((d) => {
+        const active = selectedDay === d.key;
+        const n = countFor(d.key);
+        return (
+          <button key={d.key} onClick={() => onSelectDay(d.key)} style={{ flex: 1, minHeight: 54, borderRadius: RAD,
+            border: active ? `2px solid ${T.brandDeep}` : `1px solid ${T.border}`,
+            background: active ? T.brandSoft : T.surface, cursor: "pointer", fontFamily: "inherit",
+            display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "6px 4px" }}>
+            <span style={{ fontSize: 13, fontWeight: active ? 700 : 600, color: active ? T.brandDeep : T.fg }}>{d.label}</span>
+            <span style={{ fontSize: 11, color: T.fgMuted, marginTop: 1 }}>{d.date}</span>
+            <span style={{ fontSize: 10, color: active ? T.brandDeep : T.fgSubtle, marginTop: 2, fontWeight: 600 }}>{n} visit{n !== 1 ? "s" : ""}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+function PhleboToday({ allVisits, selectedDay, onSelectDay, onOpen }) {
+  const visits = allVisits.filter((v) => v.day === selectedDay);
+  const isToday = selectedDay === 0;
+  const priority = visits.filter((v) => v.priority && v.status !== "HANDED_OVER");
+  const pending = visits.filter((v) => !v.priority && v.status !== "COLLECTED" && v.status !== "HANDED_OVER");
+  const done = visits.filter((v) => v.status === "COLLECTED" || v.status === "HANDED_OVER");
+  const toCollect = visits.filter((v) => v.pay === "TO_COLLECT").reduce((s, v) => s + v.amount, 0);
+  const countFor = (day) => allVisits.filter((v) => v.day === day).length;
+
+  return (
+    <Screen>
+      <DaySelector selectedDay={selectedDay} onSelectDay={onSelectDay} countFor={countFor} />
+
+      <Card style={{ marginBottom: 14 }}>
+        <div style={{ display: "flex", justifyContent: "space-between" }}>
+          <div><div style={{ fontSize: 24, fontWeight: 700, color: T.fg }}>{visits.length}</div><div style={{ fontSize: 12, color: T.fgMuted }}>visits {isToday ? "today" : SCHEDULE_DAYS.find(d => d.key === selectedDay).label.toLowerCase()}</div></div>
+          <div style={{ textAlign: "right" }}><div style={{ fontSize: 24, fontWeight: 700, color: T.warning, ...tnum }}>{rupee(toCollect)}</div><div style={{ fontSize: 12, color: T.fgMuted }}>to collect</div></div>
+        </div>
+      </Card>
+
+      {!isToday && (
+        <Card tone="info" style={{ marginBottom: 14, fontSize: 13, color: T.fg }}>
+          📅 This is your upcoming schedule. Visit actions (start, collect, handover) unlock on the day itself.
+        </Card>
+      )}
+
+      {isToday ? (
+        <>
+          {priority.length > 0 && <>
+            <div style={{ fontSize: 12, fontWeight: 700, color: T.error, textTransform: "uppercase", marginBottom: 8 }}>⚠ Priority</div>
+            {priority.map((v) => <VisitCard key={v.id} v={v} onOpen={onOpen} />)}
+          </>}
+          <div style={{ fontSize: 12, fontWeight: 700, color: T.fgMuted, textTransform: "uppercase", margin: "6px 0 8px" }}>Visits</div>
+          {pending.map((v) => <VisitCard key={v.id} v={v} onOpen={onOpen} />)}
+          {done.length > 0 && <>
+            <div style={{ fontSize: 12, fontWeight: 700, color: T.success, textTransform: "uppercase", margin: "10px 0 8px" }}>✓ Done</div>
+            {done.map((v) => <Card key={v.id} style={{ marginBottom: 8, opacity: 0.7 }}>
+              <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: T.fg, fontWeight: 600 }}>{v.patient}</span><Pill tone="success">{v.status === "HANDED_OVER" ? "✓ Handed over" : "Collected"}</Pill></div></Card>)}
+          </>}
+        </>
+      ) : (
+        <>
+          <div style={{ fontSize: 12, fontWeight: 700, color: T.fgMuted, textTransform: "uppercase", margin: "6px 0 8px" }}>Scheduled visits</div>
+          {visits.length === 0 && <Card style={{ textAlign: "center", color: T.fgMuted }}>Nothing scheduled yet for this day.</Card>}
+          {visits.map((v) => <ScheduledVisitCard key={v.id} v={v} onOpen={onOpen} />)}
+        </>
+      )}
+    </Screen>
+  );
+}
+function ScheduledVisitCard({ v, onOpen }) {
+  const [tone, label] = payChip(v.pay);
+  return (
+    <Card onClick={() => onOpen(v.id)} style={{ marginBottom: 10 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontWeight: 700, color: T.fg }}>{v.patient} <span style={{ fontWeight: 400, color: T.fgMuted, fontSize: 12 }}>· {v.age}{v.gender}</span></div>
+          <div style={{ fontSize: 12, color: T.fgSubtle, ...tnum }}>UHID {v.uhid}</div>
+          <div style={{ fontSize: 13, color: T.fgMuted, marginTop: 4 }}>📍 {v.locality} · {v.km} km</div>
+          <div style={{ fontSize: 12, color: T.fgMuted, marginTop: 2 }}>{v.tests.length} test{v.tests.length > 1 ? "s" : ""} · {v.slot}</div>
+        </div>
+        <Pill tone={tone}>{label}</Pill>
+      </div>
+    </Card>
+  );
+}
+function VisitCard({ v, onOpen }) {
+  const [tone, label] = payChip(v.pay);
+  return (
+    <Card tone={v.priority ? "error" : "neutral"} onClick={() => onOpen(v.id)} style={{ marginBottom: 10 }}>
+      {v.priority && <div style={{ fontSize: 12, color: T.error, fontWeight: 600, marginBottom: 6 }}>{v.priorityReason}</div>}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontWeight: 700, color: T.fg }}>{v.patient} <span style={{ fontWeight: 400, color: T.fgMuted, fontSize: 12 }}>· {v.age}{v.gender}</span></div>
+          <div style={{ fontSize: 12, color: T.fgSubtle, ...tnum }}>UHID {v.uhid}</div>
+          <div style={{ fontSize: 13, color: T.fgMuted, marginTop: 4 }}>📍 {v.locality} · {v.km} km</div>
+          <div style={{ fontSize: 12, color: T.fgMuted, marginTop: 2 }}>{v.tests.length} test{v.tests.length > 1 ? "s" : ""} · {v.slot}</div>
+        </div>
+        <div style={{ textAlign: "right" }}>
+          <Pill tone={tone}>{label}</Pill>
+          {v.fasting > 0 && <div style={{ marginTop: 6 }}><Pill tone="warning">{v.fasting}h fast</Pill></div>}
+        </div>
+      </div>
+      <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+        <button style={miniBtn(T.brandSoft, T.brandDeep)}>🧭 Navigate</button>
+        <button style={miniBtn(T.brandSoft, T.brandDeep)}>📞 Call</button>
+      </div>
+    </Card>
+  );
+}
+const miniBtn = (bg, c) => ({ flex: 1, background: bg, color: c, border: "none", borderRadius: 12, padding: "8px 0", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" });
+
+/* ---------- VISIT DETAIL ---------- */
+function PhleboVisit({ v, readOnly, onStart, onReached, onCollect, onBack }) {
+  const vialColor = (vial) => vial.includes("lavender") ? "#C9A6E0" : vial.includes("gold") ? "#E0B84A" : vial.includes("grey") ? "#9AA5AD" : vial.includes("blue") ? "#5B8DEF" : "#7BB88F";
+  return (
+    <Screen footer={
+      readOnly ? <PrimaryBtn onClick={onBack}>Back to schedule</PrimaryBtn> :
+      v.status === "PENDING" ? <AccentBtn onClick={onStart}>Start visit</AccentBtn> :
+      v.status === "ON_THE_WAY" ? <AccentBtn onClick={onReached}>I've reached</AccentBtn> :
+      v.status === "REACHED" ? <AccentBtn onClick={onCollect}>Collect sample</AccentBtn> :
+      <PrimaryBtn onClick={onBack}>Back to today</PrimaryBtn>
+    }>
+      {readOnly && (
+        <Card tone="info" style={{ marginBottom: 12, fontSize: 13, color: T.fg }}>
+          📅 Scheduled for {SCHEDULE_DAYS.find(d => d.key === v.day)?.date}. Actions unlock on the day of the visit.
+        </Card>
+      )}
+      <div style={{ fontSize: 20, fontWeight: 700, color: T.fg }}>{v.patient}</div>
+      <div style={{ fontSize: 13, color: T.fgMuted, ...tnum }}>UHID {v.uhid} · {v.age} {v.gender} · {v.code}</div>
+
+      {v.visitCode && <Card tone="accent" style={{ margin: "12px 0", textAlign: "center" }}>
+        <div style={{ fontSize: 12, color: T.fgMuted }}>Write this code on every vial</div>
+        <div style={{ fontSize: 30, fontWeight: 800, color: T.accentStrong, letterSpacing: 4, ...tnum }}>{v.visitCode}</div>
+      </Card>}
+
+      {/* address + map */}
+      <Card style={{ margin: "12px 0" }}>
+        <div style={{ fontWeight: 700, color: T.fg, fontSize: 15 }}>📍 {v.locality}</div>
+        <div style={{ fontSize: 13, color: T.fgMuted }}>Landmark: opposite Gurudwara · {v.km} km from centre</div>
+        <div style={{ height: 120, borderRadius: 12, background: `linear-gradient(135deg,${T.brandSoft},${T.infoSoft})`,
+          display: "flex", alignItems: "center", justifyContent: "center", fontSize: 30, margin: "10px 0" }}>🗺</div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button style={miniBtn(T.brandDeep, "#fff")}>🧭 Navigate</button>
+          <button style={miniBtn(T.brandSoft, T.brandDeep)}>📞 Call</button>
+          <button style={miniBtn(T.successSoft, T.success)}>💬 WhatsApp</button>
+        </div>
+      </Card>
+
+      {v.fasting > 0 && <Card tone="warning" style={{ marginBottom: 12 }}>
+        <div style={{ fontSize: 13, color: T.fg, fontWeight: 600 }}>⚠ Patient must have fasted {v.fasting} hours — confirm before draw</div></Card>}
+
+      {/* vials in order of draw */}
+      <div style={{ fontSize: 12, fontWeight: 700, color: T.fgMuted, textTransform: "uppercase", margin: "6px 0 8px" }}>Samples to collect (order of draw)</div>
+      {v.tests.map((t, i) => (
+        <Card key={i} style={{ marginBottom: 8, display: "flex", alignItems: "center", gap: 12 }}>
+          <div style={{ width: 14, height: 30, borderRadius: 3, background: vialColor(t.vial), flexShrink: 0, border: "1px solid rgba(0,0,0,0.1)" }} />
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 600, color: T.fg }}>{t.en}</div>
+            <div style={{ fontSize: 12, color: T.fgMuted }}>{t.vial} · {t.n} vial</div>
+          </div>
+        </Card>
+      ))}
+
+      <Card style={{ marginTop: 12, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <span style={{ color: T.fgMuted, fontSize: 13 }}>Payment</span>
+        {(() => { const [tone, label] = payChip(v.pay); return <Pill tone={tone}>{label} · {rupee(v.amount)}</Pill>; })()}
+      </Card>
+    </Screen>
+  );
+}
+
+/* ---------- COLLECT (vial checklist + payment gate) ---------- */
+function PhleboCollect({ v, onDone }) {
+  const [checked, setChecked] = useState({});
+  const [paid, setPaid] = useState(v.pay !== "TO_COLLECT");
+  const [showQr, setShowQr] = useState(false);
+  const allChecked = v.tests.every((_, i) => checked[i]);
+  const canComplete = allChecked && paid;
+  return (
+    <Screen footer={
+      <AccentBtn disabled={!canComplete}
+        reason={!allChecked ? "Check off every vial" : !paid ? `Collect ${rupee(v.amount)} first` : ""}
+        onClick={onDone}>Mark collected</AccentBtn>
+    }>
+      <Card tone="accent" style={{ marginBottom: 14, textAlign: "center" }}>
+        <div style={{ fontSize: 12, color: T.fgMuted }}>Write on every vial</div>
+        <div style={{ fontSize: 30, fontWeight: 800, color: T.accentStrong, letterSpacing: 4, ...tnum }}>{v.visitCode}</div>
+      </Card>
+
+      <div style={{ fontSize: 12, fontWeight: 700, color: T.fgMuted, textTransform: "uppercase", marginBottom: 8 }}>Vial checklist</div>
+      {v.tests.map((t, i) => (
+        <Card key={i} onClick={() => setChecked({ ...checked, [i]: !checked[i] })} style={{ marginBottom: 8,
+          display: "flex", alignItems: "center", gap: 12, border: checked[i] ? `2px solid ${T.success}` : `1px solid ${T.border}` }}>
+          <div style={{ width: 22, height: 22, borderRadius: 6, flexShrink: 0, background: checked[i] ? T.success : T.surface,
+            border: checked[i] ? "none" : `2px solid ${T.fgSubtle}`, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center" }}>{checked[i] ? "✓" : ""}</div>
+          <div><div style={{ fontWeight: 600, color: T.fg }}>{t.en}</div><div style={{ fontSize: 12, color: T.fgMuted }}>{t.vial} · {t.n} vial</div></div>
+        </Card>
+      ))}
+
+      {/* payment gate */}
+      <div style={{ fontSize: 12, fontWeight: 700, color: T.fgMuted, textTransform: "uppercase", margin: "14px 0 8px" }}>Payment</div>
+      {paid ? (
+        <Card tone="success"><div style={{ fontWeight: 600, color: T.fg }}>✓ {payChip(v.pay)[1]} · {rupee(v.amount)}</div></Card>
+      ) : (
+        <Card tone="warning">
+          <div style={{ fontWeight: 600, color: T.fg, marginBottom: 10 }}>{rupee(v.amount)} to collect — take payment first</div>
+          <button onClick={() => setShowQr(true)} style={{ ...miniBtn(T.brandDeep, "#fff"), width: "100%" }}>Show UPI QR</button>
+        </Card>
+      )}
+
+      <Sheet open={showQr} onClose={() => setShowQr(false)} title={`Collect ${rupee(v.amount)}`}>
+        <div style={{ textAlign: "center" }}>
+          <div style={{ width: 160, height: 160, margin: "0 auto 12px", background: "#fff", borderRadius: 12,
+            display: "grid", gridTemplateColumns: "repeat(11,1fr)", gap: 1, padding: 8, boxSizing: "border-box" }}>
+            {Array.from({ length: 121 }).map((_, i) => <div key={i} style={{ background: (i * 7 + i % 5 + Math.floor(i / 11)) % 3 === 0 ? T.fg : "transparent" }} />)}
+          </div>
+          <div style={{ fontSize: 13, color: T.fgMuted, marginBottom: 14 }}>Booking-linked QR · {v.code}</div>
+          <AccentBtn onClick={() => { setPaid(true); setShowQr(false); }}>Simulate payment received ✓</AccentBtn>
+        </div>
+      </Sheet>
+    </Screen>
+  );
+}
+
+/* ---------- QUEUE (Rx verification) ---------- */
+function PhleboQueue({ queue }) {
+  return (
+    <Screen>
+      <div style={{ fontSize: 13, color: T.fgMuted, marginBottom: 12 }}>Prescriptions and identity matches waiting for your review.</div>
+      {queue.map((q) => (
+        <Card key={q.id} style={{ marginBottom: 10 }} tone={q.waiting > 30 ? "error" : "neutral"}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+            <div>
+              <div style={{ fontWeight: 600, color: T.fg }}>{q.patient}</div>
+              <div style={{ fontSize: 12, color: T.fgSubtle, ...tnum }}>{q.mobile}</div>
+              <div style={{ fontSize: 12, color: q.waiting > 30 ? T.error : T.fgMuted, marginTop: 4 }}>⏱ waiting {q.waiting} min · {q.status}</div>
+            </div>
+            <div style={{ width: 44, height: 56, borderRadius: 8, background: T.sunken, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22 }}>📄</div>
+          </div>
+          <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+            <button style={miniBtn(T.brandDeep, "#fff")}>Review Rx</button>
+            <button style={miniBtn(T.brandSoft, T.brandDeep)}>Ask senior</button>
+          </div>
+        </Card>
+      ))}
+    </Screen>
+  );
+}
+
+/* ---------- HANDOVER ---------- */
+function PhleboHandover({ visits, onConfirm }) {
+  const collected = visits.filter((v) => v.status === "COLLECTED");
+  const [ticked, setTicked] = useState({});
+  const [justDone, setJustDone] = useState(null); // { names, code } snapshot shown after confirming
+  const allVials = collected.flatMap((v) => v.tests.map((t, i) => `${v.id}-${i}`));
+  const allTicked = allVials.length > 0 && allVials.every((k) => ticked[k]);
+
+  const confirm = () => {
+    const ids = collected.map((v) => v.id);
+    const names = collected.map((v) => v.patient);
+    onConfirm(ids);
+    setJustDone({ names, count: ids.length });
+    setTicked({});
+  };
+
+  if (justDone) {
+    return (
+      <Screen footer={<PrimaryBtn onClick={() => setJustDone(null)}>Back to Handover</PrimaryBtn>}>
+        <Card tone="success" style={{ textAlign: "center", padding: 28 }}>
+          <div style={{ fontSize: 40 }}>✅</div>
+          <div style={{ fontSize: 18, fontWeight: 700, color: T.fg, marginTop: 8 }}>Handover complete</div>
+          <div style={{ fontSize: 13, color: T.fgMuted, marginTop: 4 }}>
+            {justDone.count} visit{justDone.count > 1 ? "s" : ""} handed over to Collection Room
+          </div>
+        </Card>
+        <div style={{ fontSize: 12, fontWeight: 700, color: T.fgMuted, textTransform: "uppercase", margin: "16px 0 8px" }}>Handed over</div>
+        {justDone.names.map((n, i) => (
+          <Card key={i} style={{ marginBottom: 8, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span style={{ color: T.fg, fontWeight: 600 }}>{n}</span>
+            <Pill tone="success">✓ Handed over</Pill>
+          </Card>
+        ))}
+      </Screen>
+    );
+  }
+
+  return (
+    <Screen footer={
+      collected.length === 0 ? <PrimaryBtn disabled>No samples to hand over</PrimaryBtn> :
+        <AccentBtn disabled={!allTicked} reason="Tick every vial" onClick={confirm}>Confirm handover to Collection Room</AccentBtn>
+    }>
+      {collected.length === 0 ? (
+        <Card style={{ textAlign: "center", color: T.fgMuted }}>Collect samples first — they'll appear here for handover.</Card>
+      ) : (
+        <>
+          <div style={{ fontSize: 13, color: T.fgMuted, marginBottom: 12 }}>{collected.length} visit{collected.length > 1 ? "s" : ""} · read aloud and tick each vial with Collection Room staff.</div>
+          {collected.map((v) => (
+            <Card key={v.id} style={{ marginBottom: 10 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+                <div style={{ fontWeight: 600, color: T.fg }}>{v.patient}</div>
+                <span style={{ fontWeight: 800, color: T.accentStrong, letterSpacing: 2, ...tnum }}>{v.visitCode}</span>
+              </div>
+              {v.tests.map((t, i) => {
+                const key = `${v.id}-${i}`;
+                return (
+                  <div key={i} onClick={() => setTicked({ ...ticked, [key]: !ticked[key] })}
+                    style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 0", cursor: "pointer" }}>
+                    <div style={{ width: 20, height: 20, borderRadius: 5, background: ticked[key] ? T.success : T.surface,
+                      border: ticked[key] ? "none" : `2px solid ${T.fgSubtle}`, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12 }}>{ticked[key] ? "✓" : ""}</div>
+                    <span style={{ color: T.fg, fontSize: 14 }}>{t.en} · {t.vial}</span>
+                  </div>
+                );
+              })}
+            </Card>
+          ))}
+        </>
+      )}
+    </Screen>
+  );
+}
+
+/* ---------- ME ---------- */
+function PhleboMe({ visits, onSignOut }) {
+  const total = visits.length;
+  const handedOver = visits.filter((v) => v.status === "HANDED_OVER").length;
+  const toCollect = visits.filter((v) => v.pay === "TO_COLLECT" && v.status !== "HANDED_OVER").reduce((s, v) => s + v.amount, 0);
+  return (
+    <Screen>
+      <div style={{ textAlign: "center", marginBottom: 16 }}>
+        <div style={{ width: 64, height: 64, borderRadius: 999, background: T.brandSoft, color: T.brandDeep,
+          display: "flex", alignItems: "center", justifyContent: "center", fontSize: 26, fontWeight: 700, margin: "0 auto 8px" }}>A</div>
+        <div style={{ fontWeight: 700, color: T.fg }}>{PHLEBO.name}</div>
+        <div style={{ color: T.fgMuted, fontSize: 13, ...tnum }}>Phlebotomist · +91 {PHLEBO.mobile.slice(0,5)} {PHLEBO.mobile.slice(5)}</div>
+      </div>
+      <Card style={{ marginBottom: 10 }}><Row l="Visits completed today" r={`${handedOver} / ${total}`} /></Card>
+      <Card style={{ marginBottom: 10 }}><Row l="Cash to reconcile" r={rupee(toCollect)} /></Card>
+      <Card tone="brand" style={{ marginBottom: 16 }}>📞 Ops desk · <span style={{ ...tnum }}>011-25264700</span></Card>
+      <GhostBtn color={T.error} onClick={onSignOut}>Sign out</GhostBtn>
+    </Screen>
+  );
+}
+
+/* ---------- PHLEBO APP SHELL ---------- */
+/* ---------- PHLEBO LOGIN (mobile + OTP, own identity from the patient app) ---------- */
+function PhleboLoginScreen({ onDone, onBackToPatient }) {
+  const isDemoBuild = BOOT_ROLE === "phlebo";
+  const [mobile, setMobile] = useState(isDemoBuild ? PHLEBO.mobile : "");
+  const [otpSent, setOtp] = useState(false);
+  const [otp, setOtpVal] = useState("");
+  return (
+    <Phone>
+      <div style={{ padding: 24, display: "flex", flexDirection: "column", minHeight: "100%", justifyContent: "center", position: "relative" }}>
+        {isDemoBuild && (
+          <div style={{ position: "absolute", top: 36, left: 0, right: 0, textAlign: "center" }}>
+            <span style={{ background: T.accentSoft, color: T.accentStrong, fontSize: 11, fontWeight: 700,
+              borderRadius: 999, padding: "4px 12px", letterSpacing: 0.3 }}>Demo build — Phlebotomist</span>
+          </div>
+        )}
+        <div style={{ textAlign: "center", marginBottom: 28 }}>
+          <div style={{ display: "flex", justifyContent: "center" }}><Logo size={72} /></div>
+          <div style={{ fontSize: 18, fontWeight: 700, color: T.brandDeep, marginTop: 12 }}>Phlebotomist Login</div>
+          <div style={{ fontSize: 13, color: T.fgMuted, marginTop: 4 }}>Sign in with your registered mobile number</div>
+        </div>
+        {!otpSent ? (
+          <>
+            <Field label="Mobile number" value={mobile} onChange={(v) => setMobile(v.replace(/\D/g, "").slice(0, 10))} placeholder="10-digit mobile" numeric />
+            <AccentBtn disabled={mobile.length !== 10} reason="Enter a 10-digit number" onClick={() => setOtp(true)}>Send OTP</AccentBtn>
+            {isDemoBuild && <div style={{ textAlign: "center", marginTop: 10, fontSize: 12, color: T.fgSubtle }}>Number pre-filled for this demo — just tap Send OTP</div>}
+          </>
+        ) : (
+          <>
+            <Field label="Enter OTP" value={otp} onChange={(v) => setOtpVal(v.replace(/\D/g, "").slice(0, 6))} placeholder="6-digit OTP" numeric note="Any 6 digits work in this demo" />
+            <AccentBtn disabled={otp.length !== 6} reason="Enter the 6-digit OTP" onClick={onDone}>Verify & continue</AccentBtn>
+          </>
+        )}
+        {onBackToPatient && !isDemoBuild && (
+          <div style={{ textAlign: "center", marginTop: 18 }}><GhostBtn onClick={onBackToPatient}>← Back to patient login</GhostBtn></div>
+        )}
+      </div>
+    </Phone>
+  );
+}
+
+
+function PhleboApp({ onSignOut }) {
+  const [tab, setTab] = useState("today");
+  const [visits, setVisits] = useState(SEED_VISITS);
+  const [selectedDay, setSelectedDay] = useState(0);
+  const [openId, setOpenId] = useState(null);
+  const [mode, setMode] = useState(null); // 'visit' | 'collect'
+  const v = visits.find((x) => x.id === openId);
+  const openIsReadOnly = v && v.day !== 0;
+
+  const update = (id, patch) => setVisits((vs) => vs.map((x) => x.id === id ? { ...x, ...patch } : x));
+
+  let body, header;
+  if (mode === "collect" && v) {
+    header = <PhleboHeader title="Collect Sample" />;
+    body = <PhleboCollect v={v} onDone={() => { update(v.id, { status: "COLLECTED" }); setMode(null); setOpenId(null); setTab("today"); }} />;
+  } else if (mode === "visit" && v) {
+    header = <PhleboHeader title={openIsReadOnly ? "Scheduled Visit" : "Visit"} />;
+    body = <PhleboVisit v={v} readOnly={openIsReadOnly}
+      onStart={() => update(v.id, { status: "ON_THE_WAY" })}
+      onReached={() => update(v.id, { status: "REACHED", visitCode: genVisitCode() })}
+      onCollect={() => setMode("collect")}
+      onBack={() => { setMode(null); setOpenId(null); }} />;
+  } else {
+    const titles = { today: "My Schedule", queue: "Rx Queue", handover: "Handover", me: "Me" };
+    header = <PhleboHeader title={titles[tab]} />;
+    body = tab === "today" ? <PhleboToday allVisits={visits} selectedDay={selectedDay} onSelectDay={setSelectedDay} onOpen={(id) => { setOpenId(id); setMode("visit"); }} />
+      : tab === "queue" ? <PhleboQueue queue={SEED_RXQUEUE} />
+      : tab === "handover" ? <PhleboHandover visits={visits} onConfirm={(ids) => setVisits((vs) => vs.map((x) => ids.includes(x.id) ? { ...x, status: "HANDED_OVER" } : x))} />
+      : <PhleboMe visits={visits.filter((x) => x.day === 0)} onSignOut={onSignOut} />;
+  }
+
+  return (
+    <Phone>
+      {header}
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>{body}</div>
+      {!mode && <PhleboNav tab={tab} onTab={setTab} queueCount={SEED_RXQUEUE.length} />}
+    </Phone>
+  );
+}
+
+
+function PatientApp({ onStaffLogin }) {
+  const [lang, setLang] = useState("en");
+  const langVal = useMemo(() => ({
+    lang, t: (k) => (STR[lang][k] ?? STR.en[k] ?? k),
+    toggle: () => setLang((l) => (l === "en" ? "hi" : "en")),
+  }), [lang]);
+
+  const [screen, setScreenRaw] = useState("login"); // route
+  const [history, setHistory] = useState([]); // stack of previous screens
+  const [tab, setTab] = useState("home");
+  const [drawer, setDrawer] = useState(false);
+  const [patients, setPatients] = useState([]); // empty until login resolves: fetched (existing) or registered (new)
+  const [reports] = useState(SEED_REPORTS);
+  const [bookings, setBookings] = useState([]);
+
+  // booking-in-progress
+  const [flowPatient, setFlowPatient] = useState(null);
+  const [cart, setCart] = useState([]);
+  const [draft, setDraft] = useState({});
+  const [activeBookingId, setActiveBookingId] = useState(null);
+  const [activeReport, setActiveReport] = useState(null);
+  const [addingFromDrawer, setAddingFromDrawer] = useState(false);
+  const [firstTimeSetup, setFirstTimeSetup] = useState(false); // true = registering the very first patient on a brand-new account
+  const [pendingPatient, setPendingPatient] = useState(null);
+  const [sheet, setSheet] = useState(null); // 'reschedule' | 'cancel'
+
+  const activeBooking = bookings.find((b) => b.id === activeBookingId);
+  const flowTotal = cart.reduce((s, c) => s + c.price, 0);
+
+  // navigate: push current screen to history, then switch. Screens that shouldn't
+  // be returned to (login, consent gates, confirmation) don't get a back button.
+  const NO_BACK = ["login", "consent", "newConsent", "app", "confirm"];
+  const setScreen = (next) => { setHistory((h) => [...h, screen]); setScreenRaw(next); };
+  const goBack = () => {
+    setHistory((h) => {
+      if (h.length === 0) { setScreenRaw("app"); return h; }
+      const prev = h[h.length - 1];
+      setScreenRaw(prev);
+      return h.slice(0, -1);
+    });
+  };
+  const canGoBack = history.length > 0 && !NO_BACK.includes(screen);
+
+  const goHome = () => { setTab("home"); setScreenRaw("app"); setHistory([]); setSheet(null); };
+  const resetFlow = () => { setFlowPatient(null); setCart([]); setDraft({}); };
+
+  /* ----- onboarding ----- */
+  if (screen === "login") return wrap(<LoginScreen
+    onStaff={() => onStaffLogin()}
+    onDone={(existing) => {
+      setHistory([]); // OTP is already verified — never let back navigation return to login
+      if (existing) {
+        // SCENARIO 1 — patient record found for this mobile number: simulate the Akhil fetch
+        setPatients(SEED_PATIENTS);
+        setScreenRaw("app"); setTab("home");
+      } else {
+        // SCENARIO 2 — no record for this mobile number: mandatory registration before Home
+        setFirstTimeSetup(true);
+        setScreenRaw("newPatient");
+      }
+    }} />);
+  if (screen === "newPatient") return wrap(<NewPatientScreen firstTime={firstTimeSetup}
+    onCreated={(p) => { setPendingPatient(p); setScreen("newConsent"); }} />,
+    firstTimeSetup ? "Welcome to SBAMI" : "Add Patient");
+  if (screen === "newConsent") return wrap(<ConsentScreen onAgree={() => {
+    setPatients((ps) => [...ps, pendingPatient]);
+    if (firstTimeSetup) { setFirstTimeSetup(false); goHome(); }
+    else if (addingFromDrawer) { setAddingFromDrawer(false); goHome(); }
+    else { setFlowPatient(pendingPatient); setScreen("book_tests"); }
+  }} />, "Privacy & Consent");
+
+  /* ----- booking flow ----- */
+  if (screen === "book_patient") return chrome("Who is this test for?",
+    <PatientSelect patients={patients} onPick={(p) => { setFlowPatient(p); setScreen("book_tests"); }}
+      onAdd={() => { setAddingFromDrawer(false); setScreen("newPatient"); }} />, false);
+
+  if (screen === "book_tests") return chrome("Select tests",
+    <TestSelect step={0} patient={flowPatient} cart={cart} setCart={setCart} onContinue={() => setScreen("book_schedule")} />, false);
+
+  if (screen === "book_schedule") return chrome("Date & Address",
+    <ScheduleScreen step={1} cart={cart} draft={draft} setDraft={setDraft} onContinue={() => setScreen("book_review")} />, false);
+
+  if (screen === "book_review") return chrome("Review Booking",
+    <ReviewScreen step={2} patient={flowPatient} cart={cart} draft={draft}
+      onEdit={(w) => setScreen(w === "patient" ? "book_patient" : w === "tests" ? "book_tests" : "book_schedule")}
+      onPay={() => setScreen("pay_select")} />, false);
+
+  if (screen === "pay_select") return chrome("Payment",
+    <PaymentSelect amount={flowTotal}
+      onUPI={() => setScreen("pay_upi")} onCard={() => setScreen("pay_card")}
+      onCash={() => finalizeBooking("PAY_ON_COLLECTION")} />, false);
+
+  if (screen === "pay_upi") return chrome("Pay via UPI",
+    <UpiPayScreen amount={flowTotal} bookingCode={"SB-" + (1000 + bookings.length)} onPaid={() => finalizeBooking("PAID_ONLINE")} />, false);
+
+  if (screen === "pay_card") return chrome("Card Payment",
+    <CardPayScreen amount={flowTotal} onPaid={() => finalizeBooking("PAID_ONLINE")} />, false);
+
+  if (screen === "confirm" && activeBooking) return chrome(activeBooking.justBooked ? "Booking Confirmed" : "Your Booking",
+    <ConfirmScreen booking={activeBooking}
+      onAdvance={(st) => setBookings((bs) => bs.map((b) => b.id === activeBooking.id ? { ...b, status: st, justBooked: false } : b))}
+      onReschedule={() => setSheet("reschedule")} onCancel={() => setSheet("cancel")}
+      onViewReport={() => { setActiveReport(reports[0]); setScreen("report"); }} />, false, true);
+
+  if (screen === "report" && activeReport) return chrome("Report",
+    <ReportViewer report={activeReport} patient={patients.find((p) => p.id === activeReport.patientId)} />, false);
+
+  /* ----- main app (tabbed) ----- */
+  return wrapApp();
+
+  /* ---------- helpers below (closures) ---------- */
+  function finalizeBooking(paymentState) {
+    const b = {
+      id: "b" + uid(), code: "SB-" + (1000 + bookings.length), patientName: flowPatient.name,
+      tests: cart, amount: flowTotal, dateLabel: draft.dateLabel, slot: draft.slot,
+      address: draft.address, landmark: draft.landmark, status: "CONFIRMED",
+      paymentState, justBooked: true, visitCode: genVisitCode(),
+    };
+    setBookings((bs) => [...bs, b]);
+    setActiveBookingId(b.id);
+    resetFlow();
+    setScreen("confirm");
+  }
+
+  function wrap(node, title) {
+    return (
+      <LangCtx.Provider value={langVal}>
+        <Phone>
+          {title && <Header title={title} onBack={goBack} canBack={canGoBack}
+            onHome={() => { resetFlow(); goHome(); }} onProfile={() => setDrawer(true)} />}
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>{node}</div>
+          <ProfileDrawer open={drawer} onClose={() => setDrawer(false)} patients={patients}
+            onAddPatient={() => { setDrawer(false); setAddingFromDrawer(true); setScreen("newPatient"); }}
+            onSignOut={() => { setDrawer(false); setScreenRaw("login"); setHistory([]); }} />
+        </Phone>
+      </LangCtx.Provider>
+    );
+  }
+  function chrome(title, node, showLogo, isConfirm) {
+    return (
+      <LangCtx.Provider value={langVal}>
+        <Phone>
+          <Header title={title} showLogo={showLogo}
+            onBack={goBack} canBack={canGoBack}
+            onHome={() => { resetFlow(); goHome(); }} onProfile={() => setDrawer(true)} />
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>{node}</div>
+          <ProfileDrawer open={drawer} onClose={() => setDrawer(false)} patients={patients}
+            onAddPatient={() => { setDrawer(false); setAddingFromDrawer(true); setScreen("newPatient"); }}
+            onSignOut={() => { setDrawer(false); setScreen("login"); }} />
+          {renderSheets()}
+        </Phone>
+      </LangCtx.Provider>
+    );
+  }
+  function wrapApp() {
+    const body = tab === "home"
+      ? <HomeScreen patients={patients} bookings={bookings} reports={reports}
+          onBook={() => setScreen("book_patient")}
+          onOpenBooking={(id) => { setActiveBookingId(id); setScreen("confirm"); }}
+          onOpenReports={() => setTab("reports")} />
+      : tab === "bookings"
+      ? <BookingsTab bookings={bookings} onOpen={(id) => { setActiveBookingId(id); setScreen("confirm"); }} />
+      : tab === "reports"
+      ? <ReportsScreen patients={patients} reports={reports} onOpen={(r) => { setActiveReport(r); setScreen("report"); }} />
+      : <ProfileTab patients={patients} onAdd={() => { setAddingFromDrawer(true); setScreen("newPatient"); }} onSignOut={() => setScreen("login")} />;
+    return (
+      <LangCtx.Provider value={langVal}>
+        <Phone>
+          <Header title={tab === "home" ? "Sri Balaji AMI" : tab[0].toUpperCase() + tab.slice(1)} showLogo={tab === "home"}
+            onHome={goHome} onProfile={() => setDrawer(true)} />
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>{body}</div>
+          <BottomNav tab={tab} onTab={setTab} />
+          <ProfileDrawer open={drawer} onClose={() => setDrawer(false)} patients={patients}
+            onAddPatient={() => { setDrawer(false); setAddingFromDrawer(true); setScreen("newPatient"); }}
+            onSignOut={() => { setDrawer(false); setScreen("login"); }} />
+        </Phone>
+      </LangCtx.Provider>
+    );
+  }
+  function renderSheets() {
+    return (
+      <>
+        <Sheet open={sheet === "reschedule"} onClose={() => setSheet(null)} title="Pick a new date & time">
+          <RescheduleBody onConfirm={() => {
+            setBookings((bs) => bs.map((b) => b.id === activeBookingId ? { ...b, status: "CONFIRMED" } : b));
+            setSheet(null);
+          }} />
+        </Sheet>
+        <Sheet open={sheet === "cancel"} onClose={() => setSheet(null)} title="Cancel booking?">
+          <Card tone="neutral" style={{ marginBottom: 14, background: T.sunken }}>
+            <Row l="Paid total" r={rupee(activeBooking?.amount || 0)} />
+            <Row l="Cancellation charge" r="₹0 (Free)" c={T.success} />
+            <div style={{ borderTop: `1px solid ${T.border}`, margin: "8px 0" }} />
+            <Row l="Refund amount" r={rupee(activeBooking?.amount || 0)} bold c={T.brandDeep} />
+          </Card>
+          <div style={{ marginBottom: 10 }}><AccentBtn onClick={() => setSheet(null)}>Keep my booking</AccentBtn></div>
+          <OutlineBtn color={T.error} text={T.error} onClick={() => {
+            setBookings((bs) => bs.map((b) => b.id === activeBookingId ? { ...b, status: "CANCELLED" } : b));
+            setSheet(null); goHome();
+          }}>Yes, cancel booking</OutlineBtn>
+        </Sheet>
+      </>
+    );
+  }
+}
+
+function Row({ l, r, bold, c }) {
+  return <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0" }}>
+    <span style={{ color: T.fgMuted, fontWeight: bold ? 700 : 400 }}>{l}</span>
+    <span style={{ color: c || T.fg, fontWeight: bold ? 700 : 600, ...tnum }}>{r}</span></div>;
+}
+function RescheduleBody({ onConfirm }) {
+  const days = useMemo(() => nextDays(3), []);
+  const [d, setD] = useState(null); const [s, setS] = useState(null);
+  return (
+    <>
+      <Label>Select date</Label>
+      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+        {days.map((x) => <button key={x.key} onClick={() => setD(x.key)} style={{ flex: 1, minHeight: 50, borderRadius: RAD,
+          border: d === x.key ? `2px solid ${T.brandDeep}` : `1px solid ${T.border}`, background: d === x.key ? T.brandSoft : T.surface,
+          color: T.fg, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>{x.label}</button>)}
+      </div>
+      <Label>Select time slot</Label>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 16 }}>
+        {SLOTS.slice(0, 4).map((x) => <button key={x} onClick={() => setS(x)} style={{ minHeight: 48, borderRadius: RAD,
+          border: s === x ? `2px solid ${T.brandDeep}` : `1px solid ${T.border}`, background: s === x ? T.brandSoft : T.surface,
+          color: T.fg, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", ...tnum }}>{x}</button>)}
+      </div>
+      <div style={{ display: "flex", gap: 8 }}>
+        <div style={{ flex: 1 }}><OutlineBtn onClick={onConfirm}>Cancel</OutlineBtn></div>
+        <div style={{ flex: 1 }}><PrimaryBtn disabled={!d || !s} onClick={onConfirm}>Confirm</PrimaryBtn></div>
+      </div>
+    </>
+  );
+}
+
+function BookingsTab({ bookings, onOpen }) {
+  if (bookings.length === 0) return <Screen><Card style={{ textAlign: "center", color: T.fgMuted }}>No bookings yet. Book a test from the Home tab.</Card></Screen>;
+  return (
+    <Screen>
+      {bookings.map((b) => (
+        <Card key={b.id} onClick={() => onOpen(b.id)} style={{ marginBottom: 10 }}
+          tone={b.status === "CANCELLED" ? "error" : b.status === "REPORT_READY" ? "success" : "neutral"}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+            <div>
+              <div style={{ fontWeight: 700, color: T.fg, ...tnum }}>{b.code}</div>
+              <div style={{ fontSize: 13, color: T.fgMuted }}>{b.patientName} · {b.tests.length} test{b.tests.length > 1 ? "s" : ""}</div>
+              <div style={{ fontSize: 12, color: T.fgSubtle }}>{b.dateLabel} · {b.slot}</div>
+            </div>
+            <Pill tone={b.status === "CANCELLED" ? "error" : "success"}>{statusLabel(b.status)}</Pill>
+          </div>
+        </Card>
+      ))}
+    </Screen>
+  );
+}
+function ProfileTab({ patients, onAdd, onSignOut }) {
+  return (
+    <Screen>
+      <div style={{ textAlign: "center", marginBottom: 16 }}>
+        <div style={{ width: 64, height: 64, borderRadius: 999, background: T.brandSoft, color: T.brandDeep,
+          display: "flex", alignItems: "center", justifyContent: "center", fontSize: 26, fontWeight: 700, margin: "0 auto 8px" }}>{patients[0]?.name[0]}</div>
+        <div style={{ fontWeight: 700, color: T.fg }}>{patients[0]?.name}</div>
+        <div style={{ color: T.fgMuted, fontSize: 13, ...tnum }}>+91 98102 34567</div>
+      </div>
+      <Label>Family details</Label>
+      {patients.map((p) => (
+        <Card key={p.id} style={{ marginBottom: 8 }}>
+          <div style={{ fontWeight: 600, color: T.fg }}>{p.name} · <span style={{ fontWeight: 400, color: T.fgMuted, fontSize: 13 }}>{p.relation}</span></div>
+          <div style={{ fontSize: 12, color: T.fgSubtle, ...tnum }}>UHID {p.uhid} · {p.age} yrs · {p.gender}</div>
+        </Card>
+      ))}
+      <div onClick={onAdd} style={{ border: `1.5px dashed ${T.brandDeep}`, borderRadius: RAD, padding: 14,
+        textAlign: "center", color: T.brandDeep, fontWeight: 600, cursor: "pointer", marginBottom: 16 }}>+ Add another patient</div>
+      <Label>Support</Label>
+      <Card tone="brand" style={{ marginBottom: 16 }}>📞 Call SBAMI · <span style={{ ...tnum }}>011-25264781</span></Card>
+      <GhostBtn color={T.error} onClick={onSignOut}>Sign out</GhostBtn>
+    </Screen>
+  );
+}
+
+/* ---------- phone frame ---------- */
+function Phone({ children }) {
+  return (
+    <div style={{ minHeight: "100vh", background: "#EDEBE6", display: "flex", alignItems: "center", justifyContent: "center", padding: 16,
+      fontFamily: "'Inter', system-ui, -apple-system, sans-serif" }}>
+      <div style={{ width: 390, height: 800, background: T.bg, borderRadius: 34, overflow: "hidden",
+        display: "flex", flexDirection: "column", position: "relative", boxShadow: "0 12px 48px rgba(0,0,0,0.25)", border: "8px solid #0f1720" }}>
+        <div style={{ height: 26, background: T.bg, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 18px", fontSize: 12, color: T.fg, fontWeight: 600, ...tnum }}>
+          <span>9:41</span><span>SBAMI</span><span>▂▄ 100%</span>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/* ======================= TOP-LEVEL APP (role switch) ======================= */
+function App() {
+  const [role, setRole] = useState(BOOT_ROLE || "patient");
+  const [phleboLoggedIn, setPhleboLoggedIn] = useState(false);
+  if (role === "phlebo") {
+    return (
+      <PhleboAppRoot
+        loggedIn={phleboLoggedIn}
+        onLoggedIn={() => setPhleboLoggedIn(true)}
+        onSignOut={() => setPhleboLoggedIn(false)}
+        onBackToPatient={() => { setRole("patient"); setPhleboLoggedIn(false); }}
+      />
+    );
+  }
+  return <PatientApp onStaffLogin={() => setRole("phlebo")} />;
+}
+
+/* Phlebo needs its own language context instance (it manages lang internally via useLang in PhleboHeader).
+   Sign-out drops phleboLoggedIn back to false, returning to the phlebo login screen — not the patient app. */
+function PhleboAppRoot({ loggedIn, onLoggedIn, onSignOut, onBackToPatient }) {
+  const [lang, setLang] = useState("en");
+  const langVal = useMemo(() => ({
+    lang, t: (k) => (STR[lang][k] ?? STR.en[k] ?? k),
+    toggle: () => setLang((l) => (l === "en" ? "hi" : "en")),
+  }), [lang]);
+  return (
+    <LangCtx.Provider value={langVal}>
+      {loggedIn
+        ? <PhleboApp onSignOut={onSignOut} />
+        : <PhleboLoginScreen onDone={onLoggedIn} onBackToPatient={BOOT_ROLE === "phlebo" ? null : onBackToPatient} />}
+    </LangCtx.Provider>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(App));
+
+</script>
+
+<script>
+(function () {
+  function showError(err) {
+    var loading = document.getElementById('boot-loading');
+    if (loading) loading.style.display = 'none';
+    var box = document.getElementById('boot-error');
+    var detail = document.getElementById('boot-error-detail');
+    if (box) box.style.display = 'flex';
+    if (detail) detail.textContent = (err && (err.stack || err.message)) ? (err.stack || err.message) : String(err);
+    console.error('SBAMI demo boot error:', err);
+  }
+  window.addEventListener('error', function (e) { showError(e.error || e.message); });
+  try {
+    if (typeof React === 'undefined' || typeof ReactDOM === 'undefined') {
+      throw new Error('React failed to load from the CDN — check your internet connection and reload.');
+    }
+    if (typeof Babel === 'undefined') {
+      throw new Error('Babel standalone failed to load from the CDN — check your internet connection and reload.');
+    }
+    window.BOOT_ROLE = "phlebo";
+    var srcEl = document.getElementById('app-source');
+    var src = srcEl.textContent;
+    var out = Babel.transform(src, { presets: [["react", { runtime: "classic" }]] }).code;
+    var run = new Function("React", "ReactDOM", out);
+    run(React, ReactDOM);
+  } catch (err) {
+    showError(err);
+  }
+})();
+</script>
+</body>
+</html>
