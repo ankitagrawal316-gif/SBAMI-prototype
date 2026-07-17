@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>SBAMI — Prototype Demos</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; min-height: 100vh;
+    background: #EDEBE6;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    color: #182620;
+  }
+  .wrap {
+    max-width: 480px; margin: 0 auto; padding: 56px 20px 40px;
+  }
+  h1 {
+    font-size: 22px; font-weight: 700; margin: 0 0 6px;
+  }
+  p.sub {
+    font-size: 14px; color: #5F6B63; margin: 0 0 32px;
+  }
+  a.card {
+    display: flex; align-items: center; gap: 14px;
+    background: #fff; border-radius: 16px; padding: 18px 16px;
+    margin-bottom: 14px; text-decoration: none; color: inherit;
+    box-shadow: 0 8px 20px rgba(24,38,32,0.08);
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+  }
+  a.card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 12px 26px rgba(24,38,32,0.12);
+  }
+  .badge {
+    width: 44px; height: 44px; border-radius: 12px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 20px; color: #fff; font-weight: 700;
+  }
+  .badge.new    { background: linear-gradient(135deg, #6FCBA9, #3FAE8B); }
+  .badge.exist  { background: linear-gradient(135deg, #F9C06B, #F0A23A); }
+  .badge.phlebo { background: #1C3B2D; }
+  .card .meta { flex: 1; }
+  .card .title { font-weight: 600; font-size: 15px; margin-bottom: 2px; }
+  .card .desc { font-size: 12.5px; color: #5F6B63; }
+  .card .arrow { font-size: 18px; color: #B9C4BE; }
+  footer { margin-top: 32px; font-size: 12px; color: #8F988F; text-align: center; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>SBAMI Prototype</h1>
+    <p class="sub">Pick a demo to open. Each one runs standalone in your browser.</p>
+
+    <a class="card" href="sbami_new_patient.html">
+      <div class="badge new">N</div>
+      <div class="meta">
+        <div class="title">New Patient</div>
+        <div class="desc">First-time booking flow</div>
+      </div>
+      <div class="arrow">›</div>
+    </a>
+
+    <a class="card" href="sbami_existing_patient.html">
+      <div class="badge exist">E</div>
+      <div class="meta">
+        <div class="title">Existing Patient</div>
+        <div class="desc">Returning patient flow</div>
+      </div>
+      <div class="arrow">›</div>
+    </a>
+
+    <a class="card" href="sbami_phlebo.html">
+      <div class="badge phlebo">P</div>
+      <div class="meta">
+        <div class="title">Phlebotomist</div>
+        <div class="desc">Field-collection app view</div>
+      </div>
+      <div class="arrow">›</div>
+    </a>
+
+    <footer>SBAMI · Sample Collection App</footer>
+  </div>
+</body>
+</html>
