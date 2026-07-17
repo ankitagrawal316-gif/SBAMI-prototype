@@ -2,11 +2,19 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="theme-color" content="#217F74" />
 <title>SBAMI — Existing Patient Demo</title>
 <style>
-  html, body { margin: 0; padding: 0; background: #EDEBE6; overscroll-behavior: none; }
-  #root { min-height: 100vh; }
+  * { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+  html, body {
+    margin: 0; padding: 0; background: #EDEBE6; overscroll-behavior: none;
+    width: 100%; height: 100%; overflow-x: hidden;
+  }
+  #root { min-height: 100dvh; }
   #boot-loading {
     position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
     font-family: -apple-system, system-ui, sans-serif; color: #5F7B86; font-size: 14px; text-align: center; padding: 24px;
@@ -2179,6 +2187,33 @@ function ProfileTab({ patients, onAdd, onSignOut }) {
 
 /* ---------- phone frame ---------- */
 function Phone({ children }) {
+  const getIsMobile = () => typeof window !== "undefined" && window.innerWidth <= 480;
+  const [isMobile, setIsMobile] = useState(getIsMobile());
+  useEffect(() => {
+    const onResize = () => setIsMobile(getIsMobile());
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  if (isMobile) {
+    // Real phone: the device's own screen IS the frame — fill it edge to edge,
+    // no fake bezel, no fake status bar (the OS already shows one), and respect
+    // notch/home-indicator safe areas so content never sits under them.
+    return (
+      <div style={{
+        width: "100%", height: "100dvh", background: T.bg,
+        display: "flex", flexDirection: "column",
+        fontFamily: "'Inter', system-ui, -apple-system, sans-serif",
+        paddingTop: "env(safe-area-inset-top)", paddingBottom: "env(safe-area-inset-bottom)",
+        boxSizing: "border-box",
+      }}>
+        {children}
+      </div>
+    );
+  }
+
+  // Desktop / wide viewport: keep the decorative phone mockup so a preview on a
+  // laptop still reads as "this is a mobile app" instead of stretching edge to edge.
   return (
     <div style={{ minHeight: "100vh", background: "#EDEBE6", display: "flex", alignItems: "center", justifyContent: "center", padding: 16,
       fontFamily: "'Inter', system-ui, -apple-system, sans-serif" }}>

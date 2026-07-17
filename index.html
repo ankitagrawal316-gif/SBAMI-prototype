@@ -2,18 +2,24 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="theme-color" content="#217F74" />
 <title>SBAMI — Prototype Demos</title>
 <style>
-  * { box-sizing: border-box; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
   html, body {
-    margin: 0; padding: 0; min-height: 100vh;
+    margin: 0; padding: 0; min-height: 100dvh;
     background: #EDEBE6;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     color: #182620;
+    overscroll-behavior: none;
   }
   .wrap {
-    max-width: 480px; margin: 0 auto; padding: 56px 20px 40px;
+    max-width: 480px; margin: 0 auto;
+    padding: calc(56px + env(safe-area-inset-top)) 20px calc(40px + env(safe-area-inset-bottom));
   }
   h1 {
     font-size: 22px; font-weight: 700; margin: 0 0 6px;
@@ -28,9 +34,15 @@
     box-shadow: 0 8px 20px rgba(24,38,32,0.08);
     transition: transform 0.15s ease, box-shadow 0.15s ease;
   }
-  a.card:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 12px 26px rgba(24,38,32,0.12);
+  a.card:active {
+    transform: scale(0.98);
+    box-shadow: 0 4px 12px rgba(24,38,32,0.10);
+  }
+  @media (hover: hover) {
+    a.card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 12px 26px rgba(24,38,32,0.12);
+    }
   }
   .badge {
     width: 44px; height: 44px; border-radius: 12px; flex-shrink: 0;
