@@ -43,18 +43,24 @@ const { useState, useMemo, useEffect, createContext, useContext } = React;
 
 /* ---------- design tokens ---------- */
 const T = {
-  bg: "#FAF9F6", bgTint: "#F2F7F6", surface: "#FFFFFF", sunken: "#F4F2ED",
-  brand: "#2A9D8F", brandDeep: "#217F74", brandSoft: "#E6F4F1",
-  accent: "#F4A261", accentStrong: "#EC8B45", accentSoft: "#FDF0E3",
-  fg: "#264653", fgMuted: "#5F7B86", fgSubtle: "#8FA3AC",
-  border: "#E6E1D9", borderStrong: "#D5CEC3",
-  success: "#5C9A6B", successSoft: "#EAF3EC",
-  warning: "#E0A038", warningSoft: "#FBF2E2",
-  error: "#C4584C", errorSoft: "#F8EAE8",
-  info: "#4A90A4", infoSoft: "#E9F1F4",
+  bg: "#FFFFFF", bgTint: "#FCEADB", surface: "#FFFFFF", sunken: "#F7F3EC",
+  brand: "#3FAE8B", brandDeep: "#1C3B2D", brandSoft: "#DFF3EA",
+  accent: "#F5A83C", accentStrong: "#E08A1F", accentSoft: "#FDEBD3",
+  fg: "#182620", fgMuted: "#5F6B63", fgSubtle: "#8F988F",
+  border: "#EAE4D8", borderStrong: "#D8CFBD",
+  success: "#2F9E6E", successSoft: "#DFF3EA",
+  warning: "#C97A1B", warningSoft: "#FDEBD3",
+  error: "#C0392B", errorSoft: "#FBE3E0",
+  info: "#2E7D6B", infoSoft: "#DFF3EA",
 };
 const RAD = 16;
 const tnum = { fontVariantNumeric: "tabular-nums" };
+/* soft pastel tile backgrounds — "brand" leans pastel teal, "accent" leans pastel coral.
+   Icons drawn on top are plain white, so they read cleanly against the pastel fill rather
+   than competing with it the way full-color glyphs would. */
+const tileGrad = (kind) => kind === "accent"
+  ? "linear-gradient(135deg, #F9C06B, #F0A23A)"
+  : "linear-gradient(135deg, #6FCBA9, #3FAE8B)";
 
 /* ---------- i18n (EN + HI) ---------- */
 const STR = {
@@ -108,6 +114,26 @@ const CATALOGUE = [
   { code: "FULLBODY", en: "Complete Health Checkup", hi: "संपूर्ण हेल्थ चेकअप", price: 2400, fasting: 12, vial: "Multiple", tat: 48, cat: "Popular", pkg: 12 },
 ];
 const CATS = ["Popular", "Diabetes", "Thyroid", "Vitamins", "Heart", "Liver", "Kidney", "Fever"];
+/* icon + two-tone kind per category — alternates brand teal / accent coral, echoing the
+   reference app's lively icon-tile treatment while staying on SBAMI's own token palette */
+const CAT_META = {
+  Popular:  { icon: "star", kind: "accent" },
+  Diabetes: { icon: "droplet", kind: "brand" },
+  Thyroid:  { icon: "butterfly", kind: "accent" },
+  Vitamins: { icon: "capsule", kind: "brand" },
+  Heart:    { icon: "heart", kind: "accent" },
+  Liver:    { icon: "liver", kind: "brand" },
+  Kidney:   { icon: "kidney", kind: "accent" },
+  Fever:    { icon: "thermometer", kind: "brand" },
+};
+/* checkup packages — bundled tests sold as a themed package, shown as the "Popular Checkup
+   Categories" tiles on Home */
+const PACKAGES = [
+  { code: "PKG_FULL", title: "Full Body Checkup", sub: "72 parameters", icon: "peopleTwo", kind: "brand", codes: ["CBC", "LIPID", "LFT", "KFT", "THYROID", "FBS", "URINE"] },
+  { code: "PKG_WOMEN", title: "Women's Health", sub: "Hormone + wellness panel", icon: "flower", kind: "accent", codes: ["CBC", "THYROID", "VITD", "VITB12"] },
+  { code: "PKG_SENIOR", title: "Senior Citizen", sub: "Heart, kidney, diabetes", icon: "person", kind: "accent", codes: ["LIPID", "KFT", "HBA1C", "CBC"] },
+  { code: "PKG_FEVER", title: "Fever Profile", sub: "COVID · Malaria · Dengue", icon: "thermometer", kind: "brand", codes: ["CBC", "DENGUE", "URINE"] },
+];
 
 /* ---------- localities near Paschim Vihar (SBAMI centre) ---------- */
 const LOCALITIES = [
@@ -124,9 +150,19 @@ const SEED_PATIENTS = [
 ];
 /* mock: tests a doctor prescribed for this patient at SBAMI, from Akhil */
 const prescribedFor = (patient) => (patient?.rxCodes || []).map((code) => CATALOGUE.find((c) => c.code === code)).filter(Boolean);
+/* demo prescription shown after "Take a photo" / "Upload from device" — stands in for what a real
+   OCR/verification pipeline would extract, so the patient can immediately pick which tests to book */
+const DEMO_RX_CODES = ["CBC", "LIPID", "TSH"];
+const demoRxTests = () => DEMO_RX_CODES.map((code) => CATALOGUE.find((c) => c.code === code)).filter(Boolean);
 const SEED_REPORTS = [
   { id: "r1", patientId: "p1", test: "Complete Blood Count", lab: "LAB/26/04821", date: "10 Jul 2026", ready: true, abnormal: false },
   { id: "r2", patientId: "p1", test: "HbA1c (Glycated Hb)", lab: "LAB/26/04822", date: "10 Jul 2026", ready: true, abnormal: true },
+];
+/* notifications: system-verified prescriptions ready to book, tied to a specific patient + test codes */
+const SEED_NOTIFICATIONS = [
+  { id: "n1", patientId: "p1", type: "RX_READY", title: "Your prescribed tests are ready to book",
+    body: "Dr. Meena Kapoor prescribed 3 tests on your last visit. Tap to add them and book your home visit.",
+    date: "12 Jul 2026", read: false },
 ];
 
 /* ---------- helpers ---------- */
@@ -146,7 +182,82 @@ const nextDays = (n) => {
 const SLOTS = ["06:00–08:00 AM", "08:00–10:00 AM", "10:00–12:00 PM", "12:00–02:00 PM", "02:00–04:00 PM", "04:00–06:00 PM"];
 
 /* ---------- SBAMI logo (inline SVG: hand cradling flame) ---------- */
-const LOGO_SRC = "data:image/webp;base64,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";
+const LOGO_SRC = "data:image/webp;base64,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";
+/* ---------- simple white icon set for pastel tiles (no external icon library needed) ---------- */
+function Icon({ name, size = 22, color = "#fff" }) {
+  const p = { width: size, height: size, viewBox: "0 0 24 24", fill: "none" };
+  switch (name) {
+    case "heart":
+      return <svg {...p}><path d="M8.5 2.5H10V4h1.5V2.5H13V4h1.5v1.5H13V7h-1.5V5.5H10V7H8.5V5.5H7V4h1.5z" fill="#E9A23B"/><path d="M12 21s-7-4.3-9.2-8.6C1 9 2.4 5.8 5.5 5.2c1.9-.4 3.7.4 4.7 2a4.8 4.8 0 0 1 4.5-2c3.1.6 4.5 3.8 3.3 6.9C15.8 16.7 9 21 9 21z" fill="#4FAE8C"/></svg>;
+    case "kidney":
+      return <svg {...p} viewBox="0 0 32 24"><path d="M9.2 2.2c-3-.5-5.6 1.7-5.6 4.7 0 1.4.7 2.3.7 3.7 0 1.7-1.2 2.4-1.2 4.2 0 2.2 1.9 3.9 4.2 3.9 3.6 0 6.4-3.3 6.4-7.4C13.7 6.9 12.1 2.9 9.2 2.2z" fill="#4FAE8C"/><path d="M22.8 2.2c3-.5 5.6 1.7 5.6 4.7 0 1.4-.7 2.3-.7 3.7 0 1.7 1.2 2.4 1.2 4.2 0 2.2-1.9 3.9-4.2 3.9-3.6 0-6.4-3.3-6.4-7.4 0-4.4 1.6-8.4 4.5-9.1z" fill="#4FAE8C"/><path d="M12.5 10.5c.8 3 .8 6 .3 8.5M19.5 10.5c-.8 3-.8 6-.3 8.5" stroke="#E9A23B" strokeWidth="2" fill="none" strokeLinecap="round"/></svg>;
+    case "liver":
+      return <svg {...p}><path d="M4 9c1-3 4.5-5.5 9-5 4 .4 7 3 7 6.5 0 4.3-3.8 8-9 8-3.7 0-6.6-2-7.3-5-.3-1.4-.2-3 .3-4.5z" fill="#4FAE8C"/><path d="M9 14c.3 1.6 1.6 2.6 1.3 4.2-.2 1-1.1 1.6-2 1.3" stroke="#E9A23B" strokeWidth="1.6" fill="none" strokeLinecap="round"/></svg>;
+    case "droplet":
+      return <svg {...p}><path d="M12 2.5c3 4 6.5 8.4 6.5 12A6.5 6.5 0 0 1 5.5 14.5c0-3.6 3.5-8 6.5-12z" fill={color} fillOpacity="0.92"/><ellipse cx="10.1" cy="12.6" rx="1.4" ry="2.1" fill="#fff"/></svg>;
+    case "butterfly":
+      return <svg {...p}>
+        <path d="M12 6.5c-1-2.2-3.1-3.5-5.3-3-2.4.5-3.7 3-3 5.5.6 2.1 2.6 3.4 4.6 3l3.7-1z" fill={color}/>
+        <path d="M12 17.5c-1 2.2-3.1 3.5-5.3 3-2.4-.5-3.7-3-3-5.5.6-2.1 2.6-3.4 4.6-3l3.7 1z" fill={color}/>
+        <path d="M12 6.5c1-2.2 3.1-3.5 5.3-3 2.4.5 3.7 3 3 5.5-.6 2.1-2.6 3.4-4.6 3l-3.7-1z" fill={color}/>
+        <path d="M12 17.5c1 2.2 3.1 3.5 5.3 3 2.4-.5 3.7-3 3-5.5-.6-2.1-2.6-3.4-4.6-3l-3.7 1z" fill={color}/>
+        <rect x="11.1" y="5.5" width="1.8" height="13" rx="0.9" fill={color}/>
+      </svg>;
+    case "capsule":
+      return <svg {...p}><circle cx="7" cy="15" r="2.6" fill="#4FAE8C"/><circle cx="15.5" cy="9" r="3.4" fill="#4FAE8C"/><path d="M7 15l4.5-7.5M15.5 9L7 15" stroke="#4FAE8C" strokeWidth="1.3" strokeLinecap="round"/><circle cx="11" cy="7.5" r="1.5" fill="#E9A23B"/><circle cx="5.3" cy="10" r="1.2" fill="#E9A23B"/><circle cx="12.5" cy="16.5" r="1.2" fill="#E9A23B"/></svg>;
+    case "thermometer":
+      return <svg {...p}><rect x="10" y="2.5" width="4" height="13" rx="2" fill={color} fillOpacity="0.92"/><circle cx="12" cy="18" r="3.5" fill={color} fillOpacity="0.92"/><path d="M15 5.5h2M15 8.5h2M15 11.5h2" stroke="#fff" strokeWidth="1" strokeLinecap="round" opacity="0.75"/></svg>;
+    case "star":
+      return <svg {...p}><path d="M12 2.5l2.7 6.3 6.8.6-5.2 4.5 1.6 6.6L12 16.9l-5.9 3.6 1.6-6.6-5.2-4.5 6.8-.6z" fill={color}/></svg>;
+    case "stethoscope":
+      return <svg {...p}><path d="M6 3v6.5a4.5 4.5 0 0 0 9 0V3" stroke={color} strokeWidth="2" strokeLinecap="round"/><circle cx="6" cy="3" r="1.6" fill={color}/><circle cx="15" cy="3" r="1.6" fill={color}/><path d="M15 14v2a4.5 4.5 0 0 0 9 0" stroke={color} strokeWidth="0" /><circle cx="19" cy="17.5" r="3.2" fill={color}/></svg>;
+    case "flower":
+      return <svg {...p}><circle cx="12" cy="12" r="2.4" fill={color}/><ellipse cx="12" cy="5.5" rx="2.6" ry="3.6" fill={color}/><ellipse cx="12" cy="18.5" rx="2.6" ry="3.6" fill={color}/><ellipse cx="5.5" cy="12" rx="3.6" ry="2.6" fill={color}/><ellipse cx="18.5" cy="12" rx="3.6" ry="2.6" fill={color}/></svg>;
+    case "person":
+      return <svg {...p}><circle cx="12" cy="7.5" r="4" fill={color}/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7" fill={color}/></svg>;
+    case "peopleTwo":
+      return <svg {...p} viewBox="0 0 32 24"><circle cx="10" cy="6" r="3.6" fill={color}/><path d="M3 22c0-4 3.1-6.4 7-6.4s7 2.4 7 6.4" fill={color}/><circle cx="23" cy="6" r="3.6" fill={color}/><path d="M16.5 22c0-4 3.1-6.4 6.5-6.4s6.5 2.4 6.5 6.4" fill={color}/></svg>;
+    case "phone":
+      return <svg {...p}><path d="M6.6 2.5l3 1 .8 3-1.9 1.9c1 2.4 2.7 4.1 5.1 5.1l1.9-1.9 3 .8 1 3-1.6 1.6c-.9.9-2.3 1.2-3.5.7-5-1.9-8.9-5.8-10.8-10.8-.5-1.2-.2-2.6.7-3.5z" fill={color}/></svg>;
+    case "chat":
+      return <svg {...p}><path d="M4 12a8 8 0 1 1 3.3 6.5L4 20l1.3-3.5A7.9 7.9 0 0 1 4 12z" fill={color}/></svg>;
+    case "document":
+      return <svg {...p}><path d="M7 2.5h7l4 4V21a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1z" fill={color}/></svg>;
+    case "syringe":
+      return <svg {...p}><g transform="rotate(45 12 12)"><rect x="9" y="2" width="6" height="4" rx="1" fill={color}/><rect x="10.2" y="6" width="3.6" height="12" fill={color}/><rect x="9.4" y="17" width="5.2" height="4" rx="1.2" fill={color}/><rect x="11.2" y="20.5" width="1.6" height="2.5" fill={color}/></g></svg>;
+    case "bell":
+      return <svg {...p}><path d="M12 2.5a1.4 1.4 0 0 1 1.4 1.4v.7c2.5.7 4.3 3 4.3 5.8v3.6l1.7 2.5a.9.9 0 0 1-.8 1.4H5.4a.9.9 0 0 1-.8-1.4l1.7-2.5V10.4c0-2.8 1.8-5.1 4.3-5.8v-.7A1.4 1.4 0 0 1 12 2.5z" fill={color}/><path d="M9.5 20a2.5 2.5 0 0 0 5 0z" fill={color}/></svg>;
+    case "search":
+      return <svg {...p}><circle cx="10.5" cy="10.5" r="6.5" stroke={color} strokeWidth="2" fill="none"/><path d="M15.3 15.3 20 20" stroke={color} strokeWidth="2" strokeLinecap="round"/></svg>;
+    case "chevronRight":
+      return <svg {...p}><path d="M9 5l7 7-7 7" stroke={color} strokeWidth="2.4" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>;
+    case "prescriptionRx":
+      return <svg {...p}><text x="12" y="18" textAnchor="middle" fontSize="17" fontWeight="700" fontFamily="Georgia, serif" fill={color}>Rx</text></svg>;
+    case "whatsapp":
+      return <svg {...p} viewBox="0 0 32 32"><path d="M16 3C9.1 3 3.5 8.6 3.5 15.5c0 2.4.7 4.7 1.9 6.6L3 29l7.1-2.3c1.8 1 3.8 1.5 5.9 1.5 6.9 0 12.5-5.6 12.5-12.5S22.9 3 16 3z" fill="#25D366"/><path d="M22.1 18.6c-.3-.2-2-1-2.3-1.1-.3-.1-.5-.2-.8.2-.2.3-.9 1.1-1.1 1.3-.2.2-.4.2-.7.1-.3-.2-1.4-.5-2.7-1.7-1-.9-1.7-2-1.9-2.3-.2-.3 0-.5.1-.7.1-.1.3-.4.5-.6.2-.2.2-.3.3-.5.1-.2 0-.4 0-.6-.1-.2-.8-1.9-1.1-2.6-.3-.7-.6-.6-.8-.6h-.7c-.2 0-.6.1-.9.4-.3.3-1.2 1.2-1.2 2.8s1.3 3.2 1.4 3.5c.2.2 2.5 3.9 6.1 5.3.9.4 1.5.6 2.1.7.9.3 1.6.2 2.2.1.7-.1 2-.8 2.3-1.6.3-.8.3-1.4.2-1.6-.1-.1-.3-.2-.6-.4z" fill="#fff"/></svg>;
+    case "search":
+      return <svg {...p}><circle cx="10.5" cy="10.5" r="6.5" stroke={color} strokeWidth="2.2" fill="none"/><line x1="15.3" y1="15.3" x2="20.5" y2="20.5" stroke={color} strokeWidth="2.2" strokeLinecap="round"/></svg>;
+    case "cart":
+      return <svg {...p}><circle cx="9" cy="20" r="1.4" fill={color}/><circle cx="17" cy="20" r="1.4" fill={color}/><path d="M2.5 3h2.3l1.9 11.3a2 2 0 0 0 2 1.7h7.6a2 2 0 0 0 2-1.6L20 7H6" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none"/></svg>;
+    case "pin":
+      return <svg {...p}><path d="M12 2.5c-3.6 0-6.5 2.8-6.5 6.4 0 4.5 6.5 12.1 6.5 12.1s6.5-7.6 6.5-12.1c0-3.6-2.9-6.4-6.5-6.4z" fill={color}/><circle cx="12" cy="9" r="2.4" fill="#1C3B2D"/></svg>;
+    case "download":
+      return <svg {...p}><path d="M12 3v11.5" stroke={color} strokeWidth="2.2" strokeLinecap="round"/><path d="M7.5 11l4.5 4.5L16.5 11" stroke={color} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" fill="none"/><path d="M5 19.5h14" stroke={color} strokeWidth="2.2" strokeLinecap="round"/></svg>;
+    case "alert":
+      return <svg {...p}><path d="M12 2.5L22.5 21H1.5z" fill={color}/><rect x="10.9" y="9" width="2.2" height="6.2" rx="1.1" fill="#fff"/><circle cx="12" cy="17.6" r="1.3" fill="#fff"/></svg>;
+    case "clock":
+      return <svg {...p}><circle cx="12" cy="12" r="9" stroke={color} strokeWidth="2" fill="none"/><path d="M12 7v5.5l4 2.3" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none"/></svg>;
+    case "calendar":
+      return <svg {...p}><rect x="3" y="5" width="18" height="16" rx="2.5" stroke={color} strokeWidth="2" fill="none"/><path d="M3 9.5h18M8 2.5v4M16 2.5v4" stroke={color} strokeWidth="2" strokeLinecap="round"/></svg>;
+    case "map":
+      return <svg {...p}><path d="M9 4L3 6.5v13.5l6-2.5 6 2.5 6-2.5V4l-6 2.5z" stroke={color} strokeWidth="1.8" strokeLinejoin="round" fill="none"/><path d="M9 4v14M15 6.5v14" stroke={color} strokeWidth="1.8"/></svg>;
+    case "checkCircle":
+      return <svg {...p}><circle cx="12" cy="12" r="9.2" fill={color}/><path d="M7.5 12.5l2.8 2.8 6.2-6.2" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" fill="none"/></svg>;
+    default:
+      return <svg {...p}><circle cx="12" cy="12" r="7" fill={color}/></svg>;
+  }
+}
+
 function Logo({ size = 40 }) {
   return (
     <img src={LOGO_SRC} width={size} height={size}
@@ -338,16 +449,23 @@ function Header({ title, onHome, onProfile, onBack, canBack, showLogo }) {
     </div>
   );
 }
-function BottomNav({ tab, onTab }) {
-  const items = [["home", "Home", "⌂"], ["bookings", "Bookings", "▤"], ["reports", "Reports", "▦"], ["profile", "Profile", "◔"]];
+function BottomNav({ tab, onTab, alertCount = 0 }) {
+  const items = [["home", "Home", "⌂"], ["alerts", "Alerts", "🔔"], ["bookings", "Bookings", "▤"], ["reports", "Reports", "▦"], ["profile", "Profile", "◔"]];
   return (
     <div style={{ display: "flex", borderTop: `1px solid ${T.border}`, background: T.surface }}>
       {items.map(([k, label, ic]) => {
         const active = tab === k;
         return (
           <button key={k} onClick={() => onTab(k)} style={{ flex: 1, background: "none", border: "none", cursor: "pointer",
-            padding: "10px 0 8px", color: active ? T.brandDeep : T.fgSubtle, fontFamily: "inherit" }}>
-            <div style={{ fontSize: 18 }}>{ic}</div>
+            padding: "10px 0 8px", color: active ? T.brandDeep : T.fgSubtle, fontFamily: "inherit", position: "relative" }}>
+            <div style={{ fontSize: 18, position: "relative", display: "inline-block" }}>
+              {ic}
+              {k === "alerts" && alertCount > 0 && (
+                <span style={{ position: "absolute", top: -4, right: -8, background: T.accent, color: T.fg,
+                  borderRadius: 999, fontSize: 9, fontWeight: 800, minWidth: 14, height: 14, lineHeight: "14px",
+                  textAlign: "center", padding: "0 2px" }}>{alertCount}</span>
+              )}
+            </div>
             <div style={{ fontSize: 11, fontWeight: active ? 600 : 400 }}>{label}</div>
             {active && <div style={{ width: 4, height: 4, borderRadius: 999, background: T.accent, margin: "3px auto 0" }} />}
           </button>
@@ -459,9 +577,88 @@ function NewPatientScreen({ onCreated, firstTime }) {
 }
 
 /* ======================= HOME ======================= */
-function HomeScreen({ patients, bookings, reports, onBook, onOpenBooking, onOpenReports }) {
+/* ---------- small reusable tiles for the redesigned Home ---------- */
+function IconTile({ icon, kind = "brand", size = 46 }) {
+  return (
+    <div style={{ width: size, height: size, borderRadius: size * 0.32, background: tileGrad(kind),
+      display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+      boxShadow: `0 4px 10px ${kind === "accent" ? "rgba(240,162,58,0.30)" : "rgba(63,174,139,0.30)"}` }}>
+      <Icon name={icon} size={size * 0.5} />
+    </div>
+  );
+}
+function QuickAction({ icon, label, onClick }) {
+  return (
+    <button onClick={onClick} style={{ flex: 1, background: "none", border: "none", cursor: "pointer",
+      display: "flex", flexDirection: "column", alignItems: "center", gap: 8, fontFamily: "inherit", padding: "4px 0" }}>
+      <Icon name={icon} size={30} color={T.accentStrong} />
+      <span style={{ fontSize: 12, fontWeight: 600, color: T.fg }}>{label}</span>
+    </button>
+  );
+}
+function CategoryTile({ cat, onClick }) {
+  const meta = CAT_META[cat] || { icon: "star", kind: "brand" };
+  const duotone = ["heart", "kidney", "liver", "capsule"].includes(meta.icon);
+  const iconColor = meta.kind === "accent" ? T.accentStrong : T.brand;
+  return (
+    <button onClick={onClick} style={{ background: T.surface, border: "none", cursor: "pointer", borderRadius: 20,
+      boxShadow: "0 10px 24px rgba(15,30,25,0.10), 0 2px 6px rgba(15,30,25,0.06)", padding: "14px 6px 10px",
+      display: "flex", flexDirection: "column", alignItems: "center", gap: 8, fontFamily: "inherit" }}>
+      <Icon name={meta.icon} size={30} color={duotone ? undefined : iconColor} />
+      <span style={{ fontSize: 11.5, fontWeight: 600, color: T.fg, textAlign: "center" }}>{cat}</span>
+    </button>
+  );
+}
+function MostBookedCard({ item, onAdd }) {
+  return (
+    <div style={{ minWidth: 168, background: T.surface, borderRadius: RAD, padding: 14, boxShadow: "0 8px 22px rgba(24,38,32,0.14), 0 2px 6px rgba(24,38,32,0.08)", flexShrink: 0 }}>
+      <IconTile icon={CAT_META[item.cat]?.icon || "star"} kind={CAT_META[item.cat]?.kind || "brand"} size={38} />
+      <div style={{ fontWeight: 600, color: T.fg, fontSize: 13, marginTop: 8, minHeight: 32 }}>{item.en}</div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8 }}>
+        <span style={{ fontWeight: 700, color: T.fg, fontSize: 14, ...tnum }}>{rupee(item.price)}</span>
+        <button onClick={() => onAdd(item)} style={{ background: T.accentSoft, color: T.accentStrong, border: "none",
+          borderRadius: 999, padding: "4px 12px", fontWeight: 700, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>+ Add</button>
+      </div>
+    </div>
+  );
+}
+function PackageTile({ pkg, onClick, tall }) {
+  const arrowColor = pkg.kind === "accent" ? T.accentStrong : T.brand;
+  return (
+    <button onClick={onClick} style={{ textAlign: "left", border: "none", cursor: "pointer", fontFamily: "inherit",
+      width: "100%", borderRadius: RAD, padding: 16, minHeight: tall ? 150 : 110, background: tileGrad(pkg.kind),
+      display: "flex", flexDirection: "column", position: "relative",
+      boxShadow: `0 6px 16px ${pkg.kind === "accent" ? "rgba(240,162,58,0.30)" : "rgba(63,174,139,0.30)"}` }}>
+      <div style={{ display: "flex", justifyContent: "flex-end" }}>
+        <div style={{ width: 20, height: 20, borderRadius: 999, background: "#fff",
+          display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <Icon name="chevronRight" size={11} color={arrowColor} />
+        </div>
+      </div>
+      {tall ? (
+        <>
+          <div style={{ fontWeight: 700, fontSize: 15, lineHeight: 1.2, color: "#fff", marginTop: 10 }}>{pkg.title}</div>
+          <div style={{ marginTop: "auto", paddingTop: 14 }}><Icon name={pkg.icon} size={40} color="#fff" /></div>
+        </>
+      ) : (
+        <div style={{ marginTop: "auto" }}>
+          <div style={{ fontWeight: 700, fontSize: 15, lineHeight: 1.2, color: "#fff" }}>{pkg.title}</div>
+          <div style={{ fontSize: 11, color: "#fff", opacity: 0.85, marginTop: 2 }}>{pkg.sub}</div>
+        </div>
+      )}
+    </button>
+  );
+}
+
+/* ======================= HOME ======================= */
+function HomeScreen({ patients, bookings, reports, onBook, onSearch, onQuickAdd, onCategory, onPackage,
+  onUploadRx, onCall, onWhatsApp, onOpenBooking, onOpenReports }) {
   const { t } = useLang();
+  const [q, setQ] = useState("");
   const active = bookings.filter((b) => !["REPORT_READY", "CANCELLED"].includes(b.status));
+  const popular = CATALOGUE.filter((c) => c.cat === "Popular").slice(0, 6);
+  const submitSearch = () => { if (q.trim()) onSearch(q.trim()); };
+
   return (
     <Screen>
       <div style={{ marginBottom: 16 }}>
@@ -469,19 +666,68 @@ function HomeScreen({ patients, bookings, reports, onBook, onOpenBooking, onOpen
         <div style={{ fontSize: 21, fontWeight: 700, color: T.fg }}>Good morning, {patients[0]?.name?.split(" ")[0]}</div>
       </div>
 
+      {/* search */}
+      <div style={{ position: "relative", marginBottom: 14 }}>
+        <input value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submitSearch()}
+          placeholder="Search for tests, packages…" style={{ width: "100%", minHeight: 50, borderRadius: 999, border: "none",
+          background: T.surface, boxShadow: "0 8px 24px rgba(24,38,32,0.16), 0 2px 8px rgba(24,38,32,0.10)", padding: "0 46px 0 18px", fontSize: 14,
+          color: T.fg, fontFamily: "inherit", boxSizing: "border-box" }} />
+        <button onClick={submitSearch} aria-label="Search" style={{ position: "absolute", right: 10, top: 0, bottom: 0, margin: "auto 0",
+          width: 24, height: 50, background: "none", border: "none", padding: 0, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
+          <Icon name="search" size={20} color={T.fgMuted} />
+        </button>
+      </div>
+
       {/* hero */}
-      <Card tone="brand" onClick={onBook} style={{ marginBottom: 16 }}>
+      <Card tone="brand" onClick={onBook} style={{ marginBottom: 16, borderLeft: "none" }}>
         <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 18, fontWeight: 700, color: T.fg }}>{t("bookHome")}</div>
             <div style={{ fontSize: 13, color: T.fgMuted, marginTop: 4 }}>{t("phleboComes")}</div>
           </div>
-          <div style={{ width: 70, height: 70, borderRadius: 12, background: "rgba(42,157,143,0.15)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-            <span style={{ fontSize: 34 }}>💉</span>
-          </div>
         </div>
         <div style={{ marginTop: 14 }}><AccentBtn onClick={onBook}>{t("bookTest")}</AccentBtn></div>
       </Card>
+
+      {/* more ways to book */}
+      <div style={{ position: "relative", border: `1px solid ${T.border}`, borderRadius: 22, padding: "24px 10px 18px", marginBottom: 20, background: T.surface }}>
+        <div style={{ position: "absolute", top: -9, left: "50%", transform: "translateX(-50%)",
+          background: T.bg, padding: "0 12px", fontSize: 12, fontWeight: 700, letterSpacing: 0.6, color: T.fgMuted, whiteSpace: "nowrap" }}>
+          MORE WAYS TO BOOK TESTS
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-around" }}>
+          <QuickAction icon="phone" label="Call us" onClick={onCall} />
+          <QuickAction icon="whatsapp" label="WhatsApp" onClick={onWhatsApp} />
+          <QuickAction icon="prescriptionRx" label="Prescription" onClick={onUploadRx} />
+        </div>
+      </div>
+
+      {/* tests by category */}
+      <Label>Tests by Category</Label>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 22 }}>
+        {CATS.filter((c) => c !== "Popular").slice(0, 8).map((c) => (
+          <CategoryTile key={c} cat={c} onClick={() => onCategory(c)} />
+        ))}
+      </div>
+
+      {/* most booked tests */}
+      <Label>Most Booked Tests</Label>
+      <div style={{ display: "flex", gap: 10, overflowX: "auto", paddingBottom: 4, marginBottom: 22 }}>
+        {popular.map((item) => <MostBookedCard key={item.code} item={item} onAdd={onQuickAdd} />)}
+      </div>
+
+      {/* packages */}
+      <Label>Popular Checkup Packages</Label>
+      <div style={{ display: "flex", gap: 12, marginBottom: 22 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 12, flex: 1 }}>
+          <PackageTile pkg={PACKAGES[0]} tall onClick={() => onPackage(PACKAGES[0])} />
+          <PackageTile pkg={PACKAGES[1]} onClick={() => onPackage(PACKAGES[1])} />
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 12, flex: 1 }}>
+          <PackageTile pkg={PACKAGES[2]} onClick={() => onPackage(PACKAGES[2])} />
+          <PackageTile pkg={PACKAGES[3]} tall onClick={() => onPackage(PACKAGES[3])} />
+        </div>
+      </div>
 
       {/* upcoming */}
       <Label>{t("upcoming")}</Label>
@@ -542,19 +788,29 @@ function PatientSelect({ patients, onPick, onAdd }) {
 }
 
 /* ======================= TEST SELECT ======================= */
-function TestSelect({ step, patient, cart, setCart, onContinue }) {
-  const [q, setQ] = useState(""); const [cat, setCat] = useState("Popular");
+function TestSelect({ step, cart, setCart, onContinue, initialCategory, initialQuery }) {
+  const { lang } = useLang();
+  const [q, setQ] = useState(initialQuery || "");
+  const [cat, setCat] = useState(initialQuery ? null : (initialCategory || "Popular"));
   const [showSheet, setShowSheet] = useState(false);
   const [rxUpload, setRxUpload] = useState(null); // 'photo' | 'gallery' | null
-  const rxTests = useMemo(() => prescribedFor(patient), [patient]);
-  const hasRx = rxTests.length > 0;
-  const [showManual, setShowManual] = useState(!hasRx); // open by default when no Rx
+  const [rxChecked, setRxChecked] = useState({}); // code -> bool, once a demo Rx is "captured"
+  const rxTests = demoRxTests();
+  const captureRx = (source) => {
+    setRxUpload(source);
+    setRxChecked(Object.fromEntries(rxTests.map((t) => [t.code, true]))); // all selected by default
+  };
+  const rxAllChecked = rxTests.every((t) => rxChecked[t.code]);
+  const toggleAllRx = () => setRxChecked(Object.fromEntries(rxTests.map((t) => [t.code, !rxAllChecked])));
+  const addRxToCart = () => {
+    const chosen = rxTests.filter((t) => rxChecked[t.code]);
+    setCart((c) => [...c.filter((x) => !DEMO_RX_CODES.includes(x.code)), ...chosen]);
+  };
   const filtered = CATALOGUE.filter((x) =>
     (q ? (x.en.toLowerCase().includes(q.toLowerCase()) || x.hi.includes(q)) : x.cat === cat));
   const total = cart.reduce((s, c) => s + c.price, 0);
   const inCart = (code) => cart.some((c) => c.code === code);
   const toggle = (item) => setCart(inCart(item.code) ? cart.filter((c) => c.code !== item.code) : [...cart, item]);
-  const addAllRx = () => setCart([...cart.filter((c) => !rxTests.some((r) => r.code === c.code)), ...rxTests]);
   return (
     <Screen footer={
       <>
@@ -564,90 +820,70 @@ function TestSelect({ step, patient, cart, setCart, onContinue }) {
             <span>🛒 {cart.length} test{cart.length > 1 ? "s" : ""} selected</span><span style={{ ...tnum }}>{rupee(total)} · View</span>
           </div>
         )}
-        <AccentBtn disabled={cart.length === 0} reason="Add at least one test" onClick={onContinue}>Continue to Date & Address</AccentBtn>
+        <AccentBtn disabled={cart.length === 0} reason="Add at least one test" onClick={onContinue}>Continue — who is this for?</AccentBtn>
       </>
     }>
       <Stepper step={step} />
 
-      {/* SOURCE 1 — prescription already in the system (SBAMI patients) */}
-      {hasRx && (
-        <Card tone="brand" style={{ marginBottom: 12 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div style={{ fontSize: 14, fontWeight: 700, color: T.brandDeep }}>Your doctor's prescription</div>
-            <Pill tone="brand">From SBAMI</Pill>
-          </div>
-          <div style={{ fontSize: 12, color: T.fgMuted, marginTop: 4, display: "flex", gap: 12, flexWrap: "wrap" }}>
-            <span>📅 Prescribed <b style={{ color: T.fg }}>{patient.rxDate}</b></span>
-            {patient.rxDoctor && <span>🩺 {patient.rxDoctor}</span>}
-          </div>
-          <div style={{ fontSize: 13, color: T.fgMuted, margin: "6px 0 10px" }}>Pick the tests you want done.</div>
-          {rxTests.map((x) => (
-            <div key={x.code} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderTop: `1px solid ${T.brandSoft}` }}>
-              <div>
-                <div style={{ fontWeight: 600, color: T.fg, fontSize: 14 }}>{x.en}</div>
-                <div style={{ fontSize: 12, color: T.fgMuted, ...tnum }}>{rupee(x.price)}{x.fasting > 0 ? ` · ${x.fasting}h fasting` : ""}</div>
-              </div>
-              <button onClick={() => toggle(x)} style={{ borderRadius: 999,
-                background: inCart(x.code) ? T.brandDeep : T.surface, color: inCart(x.code) ? "#fff" : T.brandDeep,
-                border: inCart(x.code) ? "none" : `1px solid ${T.brand}`,
-                padding: "5px 14px", fontWeight: 600, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>
-                {inCart(x.code) ? "Added ✓" : "Add"}</button>
-            </div>
-          ))}
-          <div style={{ marginTop: 10 }}><GhostBtn onClick={addAllRx}>+ Add all prescribed tests</GhostBtn></div>
-        </Card>
-      )}
-
-      {/* SOURCE 2 — upload / photograph a prescription */}
-      <Card style={{ marginBottom: 12 }}>
-        <div style={{ fontSize: 14, fontWeight: 700, color: T.fg }}>{hasRx ? "Have another prescription?" : "Have a prescription?"}</div>
+      {/* have a prescription instead? */}
+      <Card style={{ marginBottom: 14 }}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: T.fg }}>Have a prescription?</div>
         <div style={{ fontSize: 13, color: T.fgMuted, margin: "2px 0 10px" }}>
-          {rxUpload ? "Our team will confirm the tests and price, usually within 30 minutes." : "Send us a photo or a digital copy. Our team reads it and confirms your tests."}
+          {rxUpload ? "Here's what we found on your prescription. Choose which tests to add." : "Send us a photo or a digital copy — we'll pull out the tests for you."}
         </div>
         {!rxUpload ? (
           <div style={{ display: "flex", gap: 8 }}>
-            <button onClick={() => setRxUpload("photo")} style={rxBtn}>📷 Take a photo</button>
-            <button onClick={() => setRxUpload("gallery")} style={rxBtn}>🖼 Upload from device</button>
+            <button onClick={() => captureRx("photo")} style={rxBtn}>📷 Take a photo</button>
+            <button onClick={() => captureRx("gallery")} style={rxBtn}>🖼 Upload from device</button>
           </div>
         ) : (
-          <Card tone="warning" style={{ padding: 12 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div style={{ fontSize: 13, color: T.fg }}>
-                {rxUpload === "photo" ? "📄 Prescription photo captured" : "📄 Prescription uploaded"}<br />
-                <span style={{ color: T.warning, fontWeight: 600 }}>Akash is reviewing it…</span>
+          <Card tone="brand" style={{ padding: 12 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+              <div style={{ fontSize: 13, color: T.fg, fontWeight: 600 }}>
+                {rxUpload === "photo" ? "📄 Prescription photo captured" : "📄 Prescription uploaded"}
               </div>
               <GhostBtn color={T.error} onClick={() => setRxUpload(null)}>Remove</GhostBtn>
+            </div>
+            {rxTests.map((t) => (
+              <label key={t.code} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 0", cursor: "pointer" }}>
+                <input type="checkbox" checked={!!rxChecked[t.code]}
+                  onChange={() => setRxChecked((c) => ({ ...c, [t.code]: !c[t.code] }))}
+                  style={{ width: 18, height: 18, accentColor: T.brand, flexShrink: 0 }} />
+                <span style={{ flex: 1, fontSize: 14, color: T.fg }}>{t.en}</span>
+                <span style={{ fontSize: 13, color: T.fgMuted, ...tnum }}>{rupee(t.price)}</span>
+              </label>
+            ))}
+            <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+              <GhostBtn onClick={toggleAllRx}>{rxAllChecked ? "Unselect all" : "Select all"}</GhostBtn>
+            </div>
+            <div style={{ marginTop: 8 }}>
+              <AccentBtn disabled={rxTests.every((t) => !rxChecked[t.code])} reason="Select at least one test"
+                onClick={addRxToCart}>Add selected to cart</AccentBtn>
             </div>
           </Card>
         )}
       </Card>
 
-      {/* SOURCE 3 — manual selection from the catalogue */}
-      <Card onClick={() => setShowManual((v) => !v)} style={{ marginBottom: showManual ? 12 : 0, cursor: "pointer" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div>
-            <div style={{ fontSize: 14, fontWeight: 700, color: T.fg }}>Choose tests yourself</div>
-            <div style={{ fontSize: 13, color: T.fgMuted }}>Search or browse the full test list</div>
-          </div>
-          <span style={{ color: T.fgMuted, fontSize: 18 }}>{showManual ? "▴" : "▾"}</span>
-        </div>
-      </Card>
-
-      {showManual && <>
-      <Field value={q} onChange={setQ} placeholder="Search — CBC, Lipid Profile, Thyroid…" />
+      {/* manual selection — search + categories, always visible (this is now the primary path) */}
+      <Field value={q} onChange={(v) => { setQ(v); setCat(null); }} placeholder="Search — CBC, Lipid Profile, Thyroid…" />
       <div style={{ display: "flex", gap: 8, overflowX: "auto", padding: "4px 0 12px" }}>
         {CATS.map((c) => (
           <button key={c} onClick={() => { setCat(c); setQ(""); }} style={{ whiteSpace: "nowrap", borderRadius: 999,
             border: cat === c && !q ? "none" : `1px solid ${T.border}`, background: cat === c && !q ? T.brandDeep : T.surface,
-            color: cat === c && !q ? "#fff" : T.fg, padding: "6px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>{c}</button>
+            color: cat === c && !q ? "#fff" : T.fg, padding: "6px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
+            display: "flex", alignItems: "center", gap: 6 }}>
+            <Icon name={CAT_META[c]?.icon || "star"} size={14} color={cat === c && !q ? "#fff" : T.brandDeep} />{c}
+          </button>
         ))}
       </div>
+      {filtered.length === 0 && <Card style={{ textAlign: "center", color: T.fgMuted }}>No tests found. Try another search.</Card>}
       {filtered.map((x) => (
         <Card key={x.code} style={{ marginBottom: 10 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+            <IconTile icon={CAT_META[x.cat]?.icon || "star"} kind={CAT_META[x.cat]?.kind || "brand"} size={40} />
             <div style={{ flex: 1 }}>
               <div style={{ fontWeight: 600, color: T.fg }}>{x.en}</div>
-              <div style={{ fontSize: 12, color: T.fgMuted }}>{x.hi}</div>
+              {lang === "hi" && <div style={{ fontSize: 12, color: T.fgMuted }}>{x.hi}</div>}
               <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
                 <Pill>{x.vial.split(" ")[0]}</Pill>
                 {x.fasting > 0 ? <Pill tone="warning">{x.fasting}h fasting</Pill> : <Pill tone="success">No fasting</Pill>}
@@ -664,7 +900,6 @@ function TestSelect({ step, patient, cart, setCart, onContinue }) {
           </div>
         </Card>
       ))}
-      </>}
       <Sheet open={showSheet} onClose={() => setShowSheet(false)} title="Your cart">
         {cart.map((c) => (
           <div key={c.code} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: `1px solid ${T.border}` }}>
@@ -720,10 +955,10 @@ function ScheduleScreen({ step, cart, draft, setDraft, onContinue }) {
   };
   const pick = (l) => { setAddr(l.name); setKm(l.km); setSugs([]); };
 
-  const ready = addr && landmark && date && slot;
+  const ready = addr && date && slot;
   return (
     <Screen footer={
-      <AccentBtn disabled={!ready} reason={!addr || !landmark ? "Enter address & landmark" : !date ? "Pick a date" : "Pick a time slot"}
+      <AccentBtn disabled={!ready} reason={!addr ? "Enter your address" : !date ? "Pick a date" : "Pick a time slot"}
         onClick={() => { setDraft({ ...draft, address: addr, landmark, km, date, dateLabel: date.label, slot }); onContinue(); }}>Review booking</AccentBtn>
     }>
       <Stepper step={step} />
@@ -747,7 +982,7 @@ function ScheduleScreen({ step, cart, draft, setDraft, onContinue }) {
           </div>
         )}
       </div>
-      <Field value={landmark} onChange={setLandmark} placeholder="Landmark (required)" note="Our phlebotomist finds the house by landmark — please be specific." />
+      <Field value={landmark} onChange={setLandmark} placeholder="Landmark (optional)" note="Helps our phlebotomist find the house faster — add one if you can." />
       {km != null && <div style={{ marginBottom: 10 }}><Pill tone="info">{km} km from SBAMI</Pill></div>}
 
       <Label>When should we come?</Label>
@@ -806,7 +1041,7 @@ function ReviewScreen({ step, patient, cart, draft, onEdit, onPay }) {
       <Card style={{ marginBottom: 12 }}>
         <div style={{ display: "flex", justifyContent: "space-between" }}><Label>Date, time & address</Label><GhostBtn onClick={() => onEdit("schedule")}>Edit</GhostBtn></div>
         <div style={{ color: T.fg, fontWeight: 600 }}>{draft.dateLabel} · {draft.slot}</div>
-        <div style={{ fontSize: 13, color: T.fgMuted, marginTop: 2 }}><b>{draft.landmark}</b>, {draft.address}</div>
+        <div style={{ fontSize: 13, color: T.fgMuted, marginTop: 2 }}>{draft.landmark ? <><b>{draft.landmark}</b>, </> : null}{draft.address}</div>
       </Card>
       <Card tone={fasting > 0 ? "warning" : "success"} style={{ marginBottom: 12 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -942,7 +1177,7 @@ function ConfirmScreen({ booking, onAdvance, onReschedule, onCancel, onViewRepor
         <span style={{ fontSize: 13, fontWeight: 600, color: T.brandDeep }}>Action Medical Institute</span></div>
       <div style={{ fontSize: 26, fontWeight: 700, color: T.brandDeep, ...tnum }}>{booking.code}</div>
       <div style={{ color: T.fgMuted, fontSize: 14, marginBottom: 4 }}>{booking.patientName} · {booking.dateLabel} · {booking.slot}</div>
-      <div style={{ fontSize: 13, color: T.fgMuted, marginBottom: 14 }}><b>{booking.landmark}</b>, {booking.address}</div>
+      <div style={{ fontSize: 13, color: T.fgMuted, marginBottom: 14 }}>{booking.landmark ? <><b>{booking.landmark}</b>, </> : null}{booking.address}</div>
 
       <Card tone={payCard[0]} style={{ marginBottom: 16 }}>
         <div style={{ fontWeight: 600, color: T.fg, ...tnum }}>{payCard[1]}</div>
@@ -1105,7 +1340,8 @@ const payChip = (p) => ({ PAID_ONLINE: ["success", "Paid online"], PRE_BILLED: [
 function PhleboHeader({ title, sync = "Online" }) {
   const { lang, toggle } = useLang();
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "12px 16px", background: T.brandDeep }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", background: T.brandDeep }}>
+      <div style={{ borderRadius: 999, overflow: "hidden", flexShrink: 0, background: "#fff" }}><Logo size={30} /></div>
       <div style={{ flex: 1 }}>
         <div style={{ color: "#fff", fontWeight: 700, fontSize: 15 }}>{title}</div>
         <div style={{ color: "rgba(255,255,255,0.7)", fontSize: 11 }}>{PHLEBO.name} · Thu 16 Jul</div>
@@ -1180,15 +1416,16 @@ function PhleboToday({ allVisits, selectedDay, onSelectDay, onOpen }) {
       </Card>
 
       {!isToday && (
-        <Card tone="info" style={{ marginBottom: 14, fontSize: 13, color: T.fg }}>
-          📅 This is your upcoming schedule. Visit actions (start, collect, handover) unlock on the day itself.
+        <Card tone="info" style={{ marginBottom: 14, fontSize: 13, color: T.fg, display: "flex", alignItems: "center", gap: 8 }}>
+          <Icon name="calendar" size={16} color={T.info} />This is your upcoming schedule. Visit actions (start, collect, handover) unlock on the day itself.
         </Card>
       )}
 
       {isToday ? (
         <>
           {priority.length > 0 && <>
-            <div style={{ fontSize: 12, fontWeight: 700, color: T.error, textTransform: "uppercase", marginBottom: 8 }}>⚠ Priority</div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: T.error, textTransform: "uppercase", marginBottom: 8, display: "flex", alignItems: "center", gap: 5 }}>
+              <Icon name="alert" size={13} color={T.error} />Priority</div>
             {priority.map((v) => <VisitCard key={v.id} v={v} onOpen={onOpen} />)}
           </>}
           <div style={{ fontSize: 12, fontWeight: 700, color: T.fgMuted, textTransform: "uppercase", margin: "6px 0 8px" }}>Visits</div>
@@ -1217,7 +1454,7 @@ function ScheduledVisitCard({ v, onOpen }) {
         <div style={{ flex: 1 }}>
           <div style={{ fontWeight: 700, color: T.fg }}>{v.patient} <span style={{ fontWeight: 400, color: T.fgMuted, fontSize: 12 }}>· {v.age}{v.gender}</span></div>
           <div style={{ fontSize: 12, color: T.fgSubtle, ...tnum }}>UHID {v.uhid}</div>
-          <div style={{ fontSize: 13, color: T.fgMuted, marginTop: 4 }}>📍 {v.locality} · {v.km} km</div>
+          <div style={{ fontSize: 13, color: T.fgMuted, marginTop: 4, display: "flex", alignItems: "center", gap: 4 }}><Icon name="pin" size={13} color={T.fgMuted} />{v.locality} · {v.km} km</div>
           <div style={{ fontSize: 12, color: T.fgMuted, marginTop: 2 }}>{v.tests.length} test{v.tests.length > 1 ? "s" : ""} · {v.slot}</div>
         </div>
         <Pill tone={tone}>{label}</Pill>
@@ -1234,7 +1471,7 @@ function VisitCard({ v, onOpen }) {
         <div style={{ flex: 1 }}>
           <div style={{ fontWeight: 700, color: T.fg }}>{v.patient} <span style={{ fontWeight: 400, color: T.fgMuted, fontSize: 12 }}>· {v.age}{v.gender}</span></div>
           <div style={{ fontSize: 12, color: T.fgSubtle, ...tnum }}>UHID {v.uhid}</div>
-          <div style={{ fontSize: 13, color: T.fgMuted, marginTop: 4 }}>📍 {v.locality} · {v.km} km</div>
+          <div style={{ fontSize: 13, color: T.fgMuted, marginTop: 4, display: "flex", alignItems: "center", gap: 4 }}><Icon name="pin" size={13} color={T.fgMuted} />{v.locality} · {v.km} km</div>
           <div style={{ fontSize: 12, color: T.fgMuted, marginTop: 2 }}>{v.tests.length} test{v.tests.length > 1 ? "s" : ""} · {v.slot}</div>
         </div>
         <div style={{ textAlign: "right" }}>
@@ -1243,13 +1480,20 @@ function VisitCard({ v, onOpen }) {
         </div>
       </div>
       <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-        <button style={miniBtn(T.brandSoft, T.brandDeep)}>🧭 Navigate</button>
-        <button style={miniBtn(T.brandSoft, T.brandDeep)}>📞 Call</button>
+        <MiniIconBtn icon="map" label="Navigate" bg={T.brandSoft} color={T.brandDeep} />
+        <MiniIconBtn icon="phone" label="Call" bg={T.brandSoft} color={T.brandDeep} />
       </div>
     </Card>
   );
 }
 const miniBtn = (bg, c) => ({ flex: 1, background: bg, color: c, border: "none", borderRadius: 12, padding: "8px 0", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" });
+function MiniIconBtn({ icon, label, bg, color, onClick }) {
+  return (
+    <button onClick={onClick} style={{ ...miniBtn(bg, color), display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+      <Icon name={icon} size={15} color={color} />{label}
+    </button>
+  );
+}
 
 /* ---------- VISIT DETAIL ---------- */
 function PhleboVisit({ v, readOnly, onStart, onReached, onCollect, onBack }) {
@@ -1263,8 +1507,8 @@ function PhleboVisit({ v, readOnly, onStart, onReached, onCollect, onBack }) {
       <PrimaryBtn onClick={onBack}>Back to today</PrimaryBtn>
     }>
       {readOnly && (
-        <Card tone="info" style={{ marginBottom: 12, fontSize: 13, color: T.fg }}>
-          📅 Scheduled for {SCHEDULE_DAYS.find(d => d.key === v.day)?.date}. Actions unlock on the day of the visit.
+        <Card tone="info" style={{ marginBottom: 12, fontSize: 13, color: T.fg, display: "flex", alignItems: "center", gap: 8 }}>
+          <Icon name="calendar" size={16} color={T.info} />Scheduled for {SCHEDULE_DAYS.find(d => d.key === v.day)?.date}. Actions unlock on the day of the visit.
         </Card>
       )}
       <div style={{ fontSize: 20, fontWeight: 700, color: T.fg }}>{v.patient}</div>
@@ -1277,19 +1521,21 @@ function PhleboVisit({ v, readOnly, onStart, onReached, onCollect, onBack }) {
 
       {/* address + map */}
       <Card style={{ margin: "12px 0" }}>
-        <div style={{ fontWeight: 700, color: T.fg, fontSize: 15 }}>📍 {v.locality}</div>
+        <div style={{ fontWeight: 700, color: T.fg, fontSize: 15, display: "flex", alignItems: "center", gap: 6 }}>
+          <Icon name="pin" size={16} color={T.brandDeep} />{v.locality}</div>
         <div style={{ fontSize: 13, color: T.fgMuted }}>Landmark: opposite Gurudwara · {v.km} km from centre</div>
         <div style={{ height: 120, borderRadius: 12, background: `linear-gradient(135deg,${T.brandSoft},${T.infoSoft})`,
-          display: "flex", alignItems: "center", justifyContent: "center", fontSize: 30, margin: "10px 0" }}>🗺</div>
+          display: "flex", alignItems: "center", justifyContent: "center", margin: "10px 0" }}><Icon name="map" size={34} color={T.brandDeep} /></div>
         <div style={{ display: "flex", gap: 8 }}>
-          <button style={miniBtn(T.brandDeep, "#fff")}>🧭 Navigate</button>
-          <button style={miniBtn(T.brandSoft, T.brandDeep)}>📞 Call</button>
-          <button style={miniBtn(T.successSoft, T.success)}>💬 WhatsApp</button>
+          <MiniIconBtn icon="map" label="Navigate" bg={T.brandDeep} color="#fff" />
+          <MiniIconBtn icon="phone" label="Call" bg={T.brandSoft} color={T.brandDeep} />
+          <MiniIconBtn icon="whatsapp" label="WhatsApp" bg={T.successSoft} color={T.success} />
         </div>
       </Card>
 
       {v.fasting > 0 && <Card tone="warning" style={{ marginBottom: 12 }}>
-        <div style={{ fontSize: 13, color: T.fg, fontWeight: 600 }}>⚠ Patient must have fasted {v.fasting} hours — confirm before draw</div></Card>}
+        <div style={{ fontSize: 13, color: T.fg, fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
+          <Icon name="alert" size={14} color={T.warning} />Patient must have fasted {v.fasting} hours — confirm before draw</div></Card>}
 
       {/* vials in order of draw */}
       <div style={{ fontSize: 12, fontWeight: 700, color: T.fgMuted, textTransform: "uppercase", margin: "6px 0 8px" }}>Samples to collect (order of draw)</div>
@@ -1375,9 +1621,10 @@ function PhleboQueue({ queue }) {
             <div>
               <div style={{ fontWeight: 600, color: T.fg }}>{q.patient}</div>
               <div style={{ fontSize: 12, color: T.fgSubtle, ...tnum }}>{q.mobile}</div>
-              <div style={{ fontSize: 12, color: q.waiting > 30 ? T.error : T.fgMuted, marginTop: 4 }}>⏱ waiting {q.waiting} min · {q.status}</div>
+              <div style={{ fontSize: 12, color: q.waiting > 30 ? T.error : T.fgMuted, marginTop: 4, display: "flex", alignItems: "center", gap: 4 }}>
+                <Icon name="clock" size={12} color={q.waiting > 30 ? T.error : T.fgMuted} />waiting {q.waiting} min · {q.status}</div>
             </div>
-            <div style={{ width: 44, height: 56, borderRadius: 8, background: T.sunken, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22 }}>📄</div>
+            <IconTile icon="prescriptionRx" kind="accent" size={44} />
           </div>
           <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
             <button style={miniBtn(T.brandDeep, "#fff")}>Review Rx</button>
@@ -1409,7 +1656,7 @@ function PhleboHandover({ visits, onConfirm }) {
     return (
       <Screen footer={<PrimaryBtn onClick={() => setJustDone(null)}>Back to Handover</PrimaryBtn>}>
         <Card tone="success" style={{ textAlign: "center", padding: 28 }}>
-          <div style={{ fontSize: 40 }}>✅</div>
+          <div style={{ display: "flex", justifyContent: "center" }}><Icon name="checkCircle" size={44} color={T.success} /></div>
           <div style={{ fontSize: 18, fontWeight: 700, color: T.fg, marginTop: 8 }}>Handover complete</div>
           <div style={{ fontSize: 13, color: T.fgMuted, marginTop: 4 }}>
             {justDone.count} visit{justDone.count > 1 ? "s" : ""} handed over to Collection Room
@@ -1577,7 +1824,10 @@ function PatientApp({ onStaffLogin }) {
   const [tab, setTab] = useState("home");
   const [drawer, setDrawer] = useState(false);
   const [patients, setPatients] = useState([]); // empty until login resolves: fetched (existing) or registered (new)
-  const [reports] = useState(SEED_REPORTS);
+  // reports only exist for patients with real history on this account — a brand-new patient
+  // has no prior visits, so SEED_REPORTS (tied to the existing seeded patient) naturally
+  // won't match and Lab Reports correctly shows empty.
+  const reports = SEED_REPORTS.filter((r) => patients.some((p) => p.id === r.patientId));
   const [bookings, setBookings] = useState([]);
 
   // booking-in-progress
@@ -1589,7 +1839,10 @@ function PatientApp({ onStaffLogin }) {
   const [addingFromDrawer, setAddingFromDrawer] = useState(false);
   const [firstTimeSetup, setFirstTimeSetup] = useState(false); // true = registering the very first patient on a brand-new account
   const [pendingPatient, setPendingPatient] = useState(null);
-  const [sheet, setSheet] = useState(null); // 'reschedule' | 'cancel'
+  const [sheet, setSheet] = useState(null); // 'reschedule' | 'cancel' | 'call' | 'whatsapp'
+  const [pendingCategory, setPendingCategory] = useState(null); // category tapped on Home, opens TestSelect pre-filtered
+  const [pendingQuery, setPendingQuery] = useState(null); // search text typed on Home
+  const [readNotifIds, setReadNotifIds] = useState([]);
 
   const activeBooking = bookings.find((b) => b.id === activeBookingId);
   const flowTotal = cart.reduce((s, c) => s + c.price, 0);
@@ -1609,7 +1862,7 @@ function PatientApp({ onStaffLogin }) {
   const canGoBack = history.length > 0 && !NO_BACK.includes(screen);
 
   const goHome = () => { setTab("home"); setScreenRaw("app"); setHistory([]); setSheet(null); };
-  const resetFlow = () => { setFlowPatient(null); setCart([]); setDraft({}); };
+  const resetFlow = () => { setFlowPatient(null); setCart([]); setDraft({}); setPendingCategory(null); setPendingQuery(null); };
 
   /* ----- onboarding ----- */
   if (screen === "login") return wrap(<LoginScreen
@@ -1633,16 +1886,17 @@ function PatientApp({ onStaffLogin }) {
     setPatients((ps) => [...ps, pendingPatient]);
     if (firstTimeSetup) { setFirstTimeSetup(false); goHome(); }
     else if (addingFromDrawer) { setAddingFromDrawer(false); goHome(); }
-    else { setFlowPatient(pendingPatient); setScreen("book_tests"); }
+    else { setFlowPatient(pendingPatient); setScreen("book_schedule"); }
   }} />, "Privacy & Consent");
 
-  /* ----- booking flow ----- */
-  if (screen === "book_patient") return chrome("Who is this test for?",
-    <PatientSelect patients={patients} onPick={(p) => { setFlowPatient(p); setScreen("book_tests"); }}
-      onAdd={() => { setAddingFromDrawer(false); setScreen("newPatient"); }} />, false);
-
+  /* ----- booking flow: TESTS FIRST, then who it's for, then schedule ----- */
   if (screen === "book_tests") return chrome("Select tests",
-    <TestSelect step={0} patient={flowPatient} cart={cart} setCart={setCart} onContinue={() => setScreen("book_schedule")} />, false);
+    <TestSelect step={0} cart={cart} setCart={setCart} onContinue={() => setScreen("book_patient")}
+      initialCategory={pendingCategory} initialQuery={pendingQuery} />, false);
+
+  if (screen === "book_patient") return chrome("Who is this test for?",
+    <PatientSelect patients={patients} onPick={(p) => { setFlowPatient(p); setScreen("book_schedule"); }}
+      onAdd={() => { setAddingFromDrawer(false); setScreen("newPatient"); }} />, false);
 
   if (screen === "book_schedule") return chrome("Date & Address",
     <ScheduleScreen step={1} cart={cart} draft={draft} setDraft={setDraft} onContinue={() => setScreen("book_review")} />, false);
@@ -1719,12 +1973,36 @@ function PatientApp({ onStaffLogin }) {
       </LangCtx.Provider>
     );
   }
+  function openNotification(n) {
+    setReadNotifIds((ids) => (ids.includes(n.id) ? ids : [...ids, n.id]));
+    if (n.type === "RX_READY") {
+      const patient = patients.find((p) => p.id === n.patientId);
+      if (patient) {
+        setCart(prescribedFor(patient));
+        setFlowPatient(patient);
+        setScreen("book_schedule"); // existing patient, prescription already verified — skip tests AND patient selection
+      }
+    }
+  }
   function wrapApp() {
+    const visibleNotifs = SEED_NOTIFICATIONS.filter((n) => patients.some((p) => p.id === n.patientId));
+    const unreadCount = visibleNotifs.filter((n) => !readNotifIds.includes(n.id)).length;
     const body = tab === "home"
       ? <HomeScreen patients={patients} bookings={bookings} reports={reports}
-          onBook={() => setScreen("book_patient")}
+          onBook={() => setScreen("book_tests")}
+          onSearch={(query) => { setPendingQuery(query); setPendingCategory(null); setScreen("book_tests"); }}
+          onQuickAdd={(item) => { setCart((c) => (c.some((x) => x.code === item.code) ? c : [...c, item])); setScreen("book_tests"); }}
+          onCategory={(cat) => { setPendingCategory(cat); setPendingQuery(null); setScreen("book_tests"); }}
+          onPackage={(pkg) => {
+            const items = pkg.codes.map((code) => CATALOGUE.find((c) => c.code === code)).filter(Boolean);
+            setCart(items); setScreen("book_tests");
+          }}
+          onUploadRx={() => setScreen("book_tests")}
+          onCall={() => setSheet("call")} onWhatsApp={() => setSheet("whatsapp")}
           onOpenBooking={(id) => { setActiveBookingId(id); setScreen("confirm"); }}
           onOpenReports={() => setTab("reports")} />
+      : tab === "alerts"
+      ? <NotificationsScreen notifications={visibleNotifs} readIds={readNotifIds} patients={patients} onOpen={openNotification} />
       : tab === "bookings"
       ? <BookingsTab bookings={bookings} onOpen={(id) => { setActiveBookingId(id); setScreen("confirm"); }} />
       : tab === "reports"
@@ -1736,10 +2014,11 @@ function PatientApp({ onStaffLogin }) {
           <Header title={tab === "home" ? "Sri Balaji AMI" : tab[0].toUpperCase() + tab.slice(1)} showLogo={tab === "home"}
             onHome={goHome} onProfile={() => setDrawer(true)} />
           <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>{body}</div>
-          <BottomNav tab={tab} onTab={setTab} />
+          <BottomNav tab={tab} onTab={setTab} alertCount={unreadCount} />
           <ProfileDrawer open={drawer} onClose={() => setDrawer(false)} patients={patients}
             onAddPatient={() => { setDrawer(false); setAddingFromDrawer(true); setScreen("newPatient"); }}
             onSignOut={() => { setDrawer(false); setScreen("login"); }} />
+          {renderSheets()}
         </Phone>
       </LangCtx.Provider>
     );
@@ -1765,6 +2044,20 @@ function PatientApp({ onStaffLogin }) {
             setBookings((bs) => bs.map((b) => b.id === activeBookingId ? { ...b, status: "CANCELLED" } : b));
             setSheet(null); goHome();
           }}>Yes, cancel booking</OutlineBtn>
+        </Sheet>
+        <Sheet open={sheet === "call"} onClose={() => setSheet(null)} title="Call SBAMI">
+          <Card tone="brand" style={{ textAlign: "center", padding: 20 }}>
+            <div style={{ fontSize: 32 }}>📞</div>
+            <div style={{ fontWeight: 700, color: T.fg, fontSize: 18, marginTop: 8, ...tnum }}>011-2526 4781</div>
+            <div style={{ fontSize: 13, color: T.fgMuted, marginTop: 4 }}>Mon–Sat, 8 AM – 8 PM</div>
+          </Card>
+        </Sheet>
+        <Sheet open={sheet === "whatsapp"} onClose={() => setSheet(null)} title="Chat on WhatsApp">
+          <Card tone="success" style={{ textAlign: "center", padding: 20 }}>
+            <div style={{ fontSize: 32 }}>💬</div>
+            <div style={{ fontWeight: 700, color: T.fg, fontSize: 16, marginTop: 8 }}>Opening WhatsApp…</div>
+            <div style={{ fontSize: 13, color: T.fgMuted, marginTop: 4 }}>+91 98100 00000 · SBAMI Support</div>
+          </Card>
         </Sheet>
       </>
     );
@@ -1798,6 +2091,44 @@ function RescheduleBody({ onConfirm }) {
         <div style={{ flex: 1 }}><PrimaryBtn disabled={!d || !s} onClick={onConfirm}>Confirm</PrimaryBtn></div>
       </div>
     </>
+  );
+}
+
+/* ======================= NOTIFICATIONS ======================= */
+function NotificationsScreen({ notifications, readIds, patients, onOpen }) {
+  if (notifications.length === 0) {
+    return (
+      <Screen>
+        <Card style={{ textAlign: "center", color: T.fgMuted, padding: 28 }}>
+          <div style={{ fontSize: 30, marginBottom: 8 }}>🔔</div>
+          No notifications yet. We'll let you know when a prescription is ready to book.
+        </Card>
+      </Screen>
+    );
+  }
+  return (
+    <Screen>
+      {notifications.map((n) => {
+        const patient = patients.find((p) => p.id === n.patientId);
+        const unread = !readIds.includes(n.id);
+        return (
+          <Card key={n.id} onClick={() => onOpen(n)} tone={unread ? "accent" : "neutral"} style={{ marginBottom: 10 }}>
+            <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+              <IconTile icon="document" kind="accent" size={42} />
+              <div style={{ flex: 1 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                  <div style={{ fontWeight: 700, color: T.fg, fontSize: 14 }}>{n.title}</div>
+                  {unread && <span style={{ width: 8, height: 8, borderRadius: 999, background: T.accent, flexShrink: 0, marginTop: 4 }} />}
+                </div>
+                <div style={{ fontSize: 13, color: T.fgMuted, marginTop: 4 }}>{n.body}</div>
+                <div style={{ fontSize: 12, color: T.fgSubtle, marginTop: 6 }}>{patient?.name} · {n.date}</div>
+              </div>
+            </div>
+            {unread && <div style={{ marginTop: 10 }}><AccentBtn onClick={() => onOpen(n)}>Add prescribed tests →</AccentBtn></div>}
+          </Card>
+        );
+      })}
+    </Screen>
   );
 }
 
