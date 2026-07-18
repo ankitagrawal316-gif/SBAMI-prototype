@@ -162,6 +162,12 @@ const prescribedFor = (patient) => (patient?.rxCodes || []).map((code) => CATALO
    OCR/verification pipeline would extract, so the patient can immediately pick which tests to book */
 const DEMO_RX_CODES = ["CBC", "LIPID", "TSH"];
 const demoRxTests = () => DEMO_RX_CODES.map((code) => CATALOGUE.find((c) => c.code === code)).filter(Boolean);
+/* paid-at-hospital prescriptions: doctor prescribed these, patient already paid the bill in person,
+   but home collection hasn't been scheduled yet. Booking this skips payment entirely. */
+const SEED_PAID_RX = [
+  { id: "pb1", patientId: "p1", billNumber: "SB/26/11842", codes: ["LFT", "KFT"], doctor: "Dr. Meena Kapoor", date: "14 Jul 2026" },
+];
+const paidRxTests = (codes) => codes.map((code) => CATALOGUE.find((c) => c.code === code)).filter(Boolean);
 const SEED_REPORTS = [
   { id: "r1", patientId: "p1", test: "Complete Blood Count", lab: "LAB/26/04821", date: "10 Jul 2026", ready: true, abnormal: false },
   { id: "r2", patientId: "p1", test: "HbA1c (Glycated Hb)", lab: "LAB/26/04822", date: "10 Jul 2026", ready: true, abnormal: true },
@@ -239,6 +245,8 @@ function Icon({ name, size = 22, color = "#fff" }) {
       return <svg {...p}><circle cx="10.5" cy="10.5" r="6.5" stroke={color} strokeWidth="2" fill="none"/><path d="M15.3 15.3 20 20" stroke={color} strokeWidth="2" strokeLinecap="round"/></svg>;
     case "chevronRight":
       return <svg {...p}><path d="M9 5l7 7-7 7" stroke={color} strokeWidth="2.4" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>;
+    case "chevronLeft":
+      return <svg {...p}><path d="M15 5l-7 7 7 7" stroke={color} strokeWidth="2.4" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>;
     case "prescriptionRx":
       return <svg {...p}><text x="12" y="18" textAnchor="middle" fontSize="17" fontWeight="700" fontFamily="Georgia, serif" fill={color}>Rx</text></svg>;
     case "whatsapp":
@@ -659,8 +667,8 @@ function PackageTile({ pkg, onClick, tall }) {
 }
 
 /* ======================= HOME ======================= */
-function HomeScreen({ patients, bookings, reports, onBook, onSearch, onQuickAdd, onCategory, onPackage,
-  onUploadRx, onCall, onWhatsApp, onOpenBooking, onOpenReports }) {
+function HomeScreen({ patients, bookings, reports, paidRx, onBook, onSearch, onQuickAdd, onCategory, onPackage,
+  onUploadRx, onCall, onWhatsApp, onOpenPaidRx, onOpenBooking, onOpenReports }) {
   const { t } = useLang();
   const [q, setQ] = useState("");
   const active = bookings.filter((b) => !["REPORT_READY", "CANCELLED"].includes(b.status));
@@ -709,6 +717,44 @@ function HomeScreen({ patients, bookings, reports, onBook, onSearch, onQuickAdd,
           <QuickAction icon="prescriptionRx" label="Prescription" onClick={onUploadRx} />
         </div>
       </div>
+
+      {/* paid at hospital, awaiting collection schedule */}
+      {paidRx.length > 0 && (
+        <>
+          <Label>Paid — ready to schedule</Label>
+          {paidRx.map((pb) => {
+            const patient = patients.find((p) => p.id === pb.patientId);
+            const tests = paidRxTests(pb.codes);
+            const amount = tests.reduce((s, t) => s + t.price, 0);
+            return (
+              <Card key={pb.id} tone="success" style={{ marginBottom: 16 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <Icon name="checkCircle" size={18} color={T.success} />
+                    <div style={{ fontWeight: 700, color: T.fg, fontSize: 15 }}>Tests paid at the hospital</div>
+                  </div>
+                  <Pill tone="success">Paid</Pill>
+                </div>
+                <div style={{ fontSize: 12, color: T.fgSubtle, marginTop: 4, ...tnum }}>
+                  Bill #{pb.billNumber} · {patient?.name} · {pb.date}</div>
+                <div style={{ marginTop: 10 }}>
+                  {tests.map((t) => (
+                    <div key={t.code} style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", fontSize: 13, color: T.fg }}>
+                      <span>{t.en}</span><span style={{ ...tnum }}>{rupee(t.price)}</span>
+                    </div>
+                  ))}
+                  <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6, paddingTop: 6, borderTop: `1px solid rgba(92,154,107,0.25)`, fontWeight: 700, color: T.fg, fontSize: 13, ...tnum }}>
+                    <span>Total paid</span><span>{rupee(amount)}</span>
+                  </div>
+                </div>
+                <div style={{ marginTop: 12 }}>
+                  <AccentBtn onClick={() => onOpenPaidRx(pb)}>Schedule collection</AccentBtn>
+                </div>
+              </Card>
+            );
+          })}
+        </>
+      )}
 
       {/* tests by category */}
       <Label>Tests by Category</Label>
@@ -796,8 +842,9 @@ function PatientSelect({ patients, onPick, onAdd }) {
 }
 
 /* ======================= TEST SELECT ======================= */
-function TestSelect({ step, cart, setCart, onContinue, initialCategory, initialQuery }) {
+function TestSelect({ step, cart, setCart, onContinue, initialCategory, initialQuery, preBilled }) {
   const { lang } = useLang();
+  const paidCodes = preBilled?.codes || [];
   const [q, setQ] = useState(initialQuery || "");
   const [cat, setCat] = useState(initialQuery ? null : (initialCategory || "Popular"));
   const [showSheet, setShowSheet] = useState(false);
@@ -818,7 +865,10 @@ function TestSelect({ step, cart, setCart, onContinue, initialCategory, initialQ
     (q ? (x.en.toLowerCase().includes(q.toLowerCase()) || x.hi.includes(q)) : x.cat === cat));
   const total = cart.reduce((s, c) => s + c.price, 0);
   const inCart = (code) => cart.some((c) => c.code === code);
-  const toggle = (item) => setCart(inCart(item.code) ? cart.filter((c) => c.code !== item.code) : [...cart, item]);
+  const toggle = (item) => {
+    if (paidCodes.includes(item.code)) return; // already paid at the hospital — can't be removed from this booking
+    setCart(inCart(item.code) ? cart.filter((c) => c.code !== item.code) : [...cart, item]);
+  };
   return (
     <Screen footer={
       <>
@@ -828,10 +878,17 @@ function TestSelect({ step, cart, setCart, onContinue, initialCategory, initialQ
             <span>🛒 {cart.length} test{cart.length > 1 ? "s" : ""} selected</span><span style={{ ...tnum }}>{rupee(total)} · View</span>
           </div>
         )}
-        <AccentBtn disabled={cart.length === 0} reason="Add at least one test" onClick={onContinue}>Continue — who is this for?</AccentBtn>
+        <AccentBtn disabled={cart.length === 0} reason="Add at least one test" onClick={onContinue}>{preBilled ? "Continue" : "Continue — who is this for?"}</AccentBtn>
       </>
     }>
       <Stepper step={step} />
+      {preBilled && (
+        <Card tone="success" style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 13, color: T.fg }}>
+            <b>Bill #{preBilled.billNumber}</b> already covers the tests marked "Paid" below. Add anything extra and we'll charge only the difference.
+          </div>
+        </Card>
+      )}
 
       {/* have a prescription instead? */}
       <Card style={{ marginBottom: 14 }}>
@@ -900,10 +957,14 @@ function TestSelect({ step, cart, setCart, onContinue, initialCategory, initialQ
             </div>
             <div style={{ textAlign: "right" }}>
               <div style={{ fontWeight: 700, color: T.fg, ...tnum }}>{rupee(x.price)}</div>
-              <button onClick={() => toggle(x)} style={{ marginTop: 6, borderRadius: 999, border: "none",
-                background: inCart(x.code) ? T.brandDeep : T.accentSoft, color: inCart(x.code) ? "#fff" : T.accentStrong,
-                padding: "5px 14px", fontWeight: 600, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>
-                {inCart(x.code) ? "Added ✓" : "Add"}</button>
+              {paidCodes.includes(x.code) ? (
+                <div style={{ marginTop: 6 }}><Pill tone="success">Paid</Pill></div>
+              ) : (
+                <button onClick={() => toggle(x)} style={{ marginTop: 6, borderRadius: 999, border: "none",
+                  background: inCart(x.code) ? T.brandDeep : T.accentSoft, color: inCart(x.code) ? "#fff" : T.accentStrong,
+                  padding: "5px 14px", fontWeight: 600, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>
+                  {inCart(x.code) ? "Added ✓" : "Add"}</button>
+              )}
             </div>
           </div>
         </Card>
@@ -911,9 +972,9 @@ function TestSelect({ step, cart, setCart, onContinue, initialCategory, initialQ
       <Sheet open={showSheet} onClose={() => setShowSheet(false)} title="Your cart">
         {cart.map((c) => (
           <div key={c.code} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: `1px solid ${T.border}` }}>
-            <span style={{ color: T.fg }}>{c.en}</span>
+            <span style={{ color: T.fg }}>{c.en}{paidCodes.includes(c.code) && <span style={{ marginLeft: 8 }}><Pill tone="success">Paid</Pill></span>}</span>
             <span style={{ display: "flex", gap: 10, ...tnum }}>{rupee(c.price)}
-              <span onClick={() => toggle(c)} style={{ color: T.error, cursor: "pointer" }}>✕</span></span>
+              {!paidCodes.includes(c.code) && <span onClick={() => toggle(c)} style={{ color: T.error, cursor: "pointer" }}>✕</span>}</span>
           </div>
         ))}
         <div style={{ display: "flex", justifyContent: "space-between", marginTop: 12, fontWeight: 700, color: T.fg, ...tnum }}>
@@ -946,7 +1007,7 @@ function statusLabel(s) {
 }
 
 /* ======================= SCHEDULE (address + slot) ======================= */
-function ScheduleScreen({ step, cart, draft, setDraft, onContinue }) {
+function ScheduleScreen({ step, cart, draft, setDraft, onContinue, preBilled, onAddTests }) {
   const [addr, setAddr] = useState(draft.address || "");
   const [landmark, setLandmark] = useState(draft.landmark || "");
   const [sugs, setSugs] = useState([]);
@@ -956,6 +1017,7 @@ function ScheduleScreen({ step, cart, draft, setDraft, onContinue }) {
   const days = useMemo(() => nextDays(3), []);
   const total = cart.reduce((s, c) => s + c.price, 0);
   const hasFasting = cart.some((c) => c.fasting > 0);
+  const extraTotal = preBilled ? cart.filter((c) => !preBilled.codes.includes(c.code)).reduce((s, c) => s + c.price, 0) : 0;
 
   const onAddr = (v) => {
     setAddr(v);
@@ -970,6 +1032,18 @@ function ScheduleScreen({ step, cart, draft, setDraft, onContinue }) {
         onClick={() => { setDraft({ ...draft, address: addr, landmark, km, date, dateLabel: date.label, slot }); onContinue(); }}>Review booking</AccentBtn>
     }>
       <Stepper step={step} />
+      {preBilled && (
+        <Card tone={extraTotal > 0 ? "warning" : "success"} style={{ marginBottom: 16 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div style={{ fontWeight: 700, color: T.fg, fontSize: 14 }}>{cart.length} test{cart.length > 1 ? "s" : ""} for this visit</div>
+            <Pill tone={extraTotal > 0 ? "warning" : "success"}>{extraTotal > 0 ? `${rupee(extraTotal)} extra due` : "Fully paid"}</Pill>
+          </div>
+          <div style={{ fontSize: 12, color: T.fgMuted, marginTop: 4 }}>
+            {rupee(preBilled.amount)} covered by Bill #{preBilled.billNumber}{extraTotal > 0 ? ` · ${rupee(extraTotal)} for the tests you've added` : ""}
+          </div>
+          <div style={{ marginTop: 10 }}><GhostBtn onClick={onAddTests}>+ Add more tests</GhostBtn></div>
+        </Card>
+      )}
       <Label>Where should we come?</Label>
       <div style={{ height: 150, borderRadius: RAD, background: `linear-gradient(135deg,${T.brandSoft},${T.infoSoft})`,
         display: "flex", alignItems: "center", justifyContent: "center", position: "relative", marginBottom: 10 }}>
@@ -1020,31 +1094,63 @@ function ScheduleScreen({ step, cart, draft, setDraft, onContinue }) {
 }
 
 /* ======================= REVIEW ======================= */
-function ReviewScreen({ step, patient, cart, draft, onEdit, onPay }) {
+function ReviewScreen({ step, patient, cart, draft, preBilled, onEdit, onPay, onConfirmPreBilled }) {
   const [readPrep, setReadPrep] = useState(false);
   const total = cart.reduce((s, c) => s + c.price, 0);
   const fasting = Math.max(0, ...cart.map((c) => c.fasting));
+  const paidCodes = preBilled?.codes || [];
+  const extraItems = preBilled ? cart.filter((c) => !paidCodes.includes(c.code)) : [];
+  const extraTotal = extraItems.reduce((s, c) => s + c.price, 0);
+  const footerLabel = !preBilled ? `Continue to payment · ${rupee(total)}`
+    : extraTotal > 0 ? `Continue to payment · ${rupee(extraTotal)}` : "Confirm booking";
+  const footerClick = !preBilled ? onPay : extraTotal > 0 ? onPay : onConfirmPreBilled;
   return (
     <Screen footer={
-      <AccentBtn disabled={!readPrep} reason="Confirm you've read the prep instructions" onClick={onPay}>Continue to payment · {rupee(total)}</AccentBtn>
+      <AccentBtn disabled={!readPrep} reason="Confirm you've read the prep instructions" onClick={footerClick}>{footerLabel}</AccentBtn>
     }>
       <Stepper step={step} />
+      {preBilled && (
+        <Card tone={extraTotal > 0 ? "warning" : "success"} style={{ marginBottom: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <Icon name="checkCircle" size={20} color={extraTotal > 0 ? T.warning : T.success} />
+            <div style={{ fontWeight: 700, color: T.fg }}>{rupee(preBilled.amount)} already paid at the hospital</div>
+          </div>
+          <div style={{ fontSize: 13, color: T.fgMuted, marginTop: 4 }}>
+            Bill #{preBilled.billNumber}.{extraTotal === 0
+              ? " No payment needed — just schedule your collection below."
+              : ` You've added ${extraItems.length} more test${extraItems.length > 1 ? "s" : ""} — ${rupee(extraTotal)} extra will need to be paid.`}
+          </div>
+        </Card>
+      )}
       <Card style={{ marginBottom: 12 }}>
         <div style={{ display: "flex", justifyContent: "space-between" }}>
           <div><Label>Patient</Label>
             <div style={{ fontWeight: 600, color: T.fg }}>{patient.name}</div>
             <div style={{ fontSize: 12, color: T.fgSubtle, ...tnum }}>UHID {patient.uhid} · {patient.relation}</div></div>
-          <GhostBtn onClick={() => onEdit("patient")}>Edit</GhostBtn>
+          {!preBilled && <GhostBtn onClick={() => onEdit("patient")}>Edit</GhostBtn>}
         </div>
       </Card>
       <Card style={{ marginBottom: 12 }}>
-        <div style={{ display: "flex", justifyContent: "space-between" }}><Label>Tests</Label><GhostBtn onClick={() => onEdit("tests")}>Edit</GhostBtn></div>
-        {cart.map((c) => (
-          <div key={c.code} style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", color: T.fg, fontSize: 14 }}>
-            <span>{c.en}</span><span style={{ ...tnum }}>{rupee(c.price)}</span></div>
-        ))}
+        <div style={{ display: "flex", justifyContent: "space-between" }}>
+          <Label>Tests</Label>
+          <GhostBtn onClick={() => onEdit("tests")}>{preBilled ? "+ Add tests" : "Edit"}</GhostBtn>
+        </div>
+        {cart.map((c) => {
+          const isPaid = preBilled && paidCodes.includes(c.code);
+          return (
+            <div key={c.code} style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", color: T.fg, fontSize: 14 }}>
+              <span>{c.en}</span>
+              {isPaid ? <Pill tone="success">Paid</Pill> : <span style={{ ...tnum }}>{rupee(c.price)}</span>}
+            </div>
+          );
+        })}
         <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8, paddingTop: 8, borderTop: `1px solid ${T.border}`, fontWeight: 700, color: T.fg, ...tnum }}>
           <span>Total</span><span style={{ fontSize: 18 }}>{rupee(total)}</span></div>
+        {preBilled && extraTotal > 0 && (
+          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4, fontSize: 12, color: T.fgMuted, ...tnum }}>
+            <span>{rupee(preBilled.amount)} already paid + {rupee(extraTotal)} due now</span>
+          </div>
+        )}
       </Card>
       <Card style={{ marginBottom: 12 }}>
         <div style={{ display: "flex", justifyContent: "space-between" }}><Label>Date, time & address</Label><GhostBtn onClick={() => onEdit("schedule")}>Edit</GhostBtn></div>
@@ -1174,11 +1280,16 @@ function statusIndex(s) { return TIMELINE.findIndex((x) => x[0] === s); }
 
 function ConfirmScreen({ booking, onAdvance, onReschedule, onCancel, onViewReport }) {
   const idx = statusIndex(booking.status);
-  const payCard = {
-    PAID_ONLINE: ["success", `Payment confirmed — ${rupee(booking.amount)}`],
-    PAY_ON_COLLECTION: ["warning", `${rupee(booking.amount)} to be paid at your door`],
-    PRE_BILLED: ["success", `Already paid at the hospital`],
-  }[booking.paymentState] || ["success", "Confirmed"];
+  const payCard = (() => {
+    switch (booking.paymentState) {
+      case "PAID_ONLINE": return ["success", `Payment confirmed — ${rupee(booking.amount)}`];
+      case "PAY_ON_COLLECTION": return ["warning", `${rupee(booking.amount)} to be paid at your door`];
+      case "PRE_BILLED": return ["success", `Already paid at the hospital${booking.billNumber ? ` — Bill #${booking.billNumber}` : ""}`];
+      case "PARTIALLY_PAID": return ["success", `${rupee(booking.prebilledAmount)} paid at the hospital (Bill #${booking.billNumber}) + ${rupee(booking.extraAmount)} paid online`];
+      case "PARTIALLY_DUE": return ["warning", `${rupee(booking.prebilledAmount)} paid at the hospital (Bill #${booking.billNumber}) · ${rupee(booking.extraAmount)} due at your door`];
+      default: return ["success", "Confirmed"];
+    }
+  })();
   return (
     <Screen>
       <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}><Logo size={24} />
@@ -1345,10 +1456,17 @@ const SEED_RXQUEUE = [
 const payChip = (p) => ({ PAID_ONLINE: ["success", "Paid online"], PRE_BILLED: ["success", "Pre-billed"], TO_COLLECT: ["warning", "To collect"] }[p] || ["neutral", p]);
 
 /* ---------- phlebo header + bottom nav ---------- */
-function PhleboHeader({ title, sync = "Online" }) {
+function PhleboHeader({ title, sync = "Online", onBack }) {
   const { lang, toggle } = useLang();
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", background: T.brandDeep }}>
+      {onBack && (
+        <button onClick={onBack} aria-label="Back" style={{ background: "rgba(255,255,255,0.14)", border: "none",
+          borderRadius: 999, width: 32, height: 32, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
+          cursor: "pointer", padding: 0 }}>
+          <Icon name="chevronLeft" size={17} color="#fff" />
+        </button>
+      )}
       <div style={{ borderRadius: 999, overflow: "hidden", flexShrink: 0, background: "#fff" }}><Logo size={30} /></div>
       <div style={{ flex: 1 }}>
         <div style={{ color: "#fff", fontWeight: 700, fontSize: 15 }}>{title}</div>
@@ -1792,10 +1910,10 @@ function PhleboApp({ onSignOut }) {
 
   let body, header;
   if (mode === "collect" && v) {
-    header = <PhleboHeader title="Collect Sample" />;
+    header = <PhleboHeader title="Collect Sample" onBack={() => setMode("visit")} />;
     body = <PhleboCollect v={v} onDone={() => { update(v.id, { status: "COLLECTED" }); setMode(null); setOpenId(null); setTab("today"); }} />;
   } else if (mode === "visit" && v) {
-    header = <PhleboHeader title={openIsReadOnly ? "Scheduled Visit" : "Visit"} />;
+    header = <PhleboHeader title={openIsReadOnly ? "Scheduled Visit" : "Visit"} onBack={() => { setMode(null); setOpenId(null); }} />;
     body = <PhleboVisit v={v} readOnly={openIsReadOnly}
       onStart={() => update(v.id, { status: "ON_THE_WAY" })}
       onReached={() => update(v.id, { status: "REACHED", visitCode: genVisitCode() })}
@@ -1851,9 +1969,12 @@ function PatientApp({ onStaffLogin }) {
   const [pendingCategory, setPendingCategory] = useState(null); // category tapped on Home, opens TestSelect pre-filtered
   const [pendingQuery, setPendingQuery] = useState(null); // search text typed on Home
   const [readNotifIds, setReadNotifIds] = useState([]);
+  const [preBilled, setPreBilled] = useState(null); // { rxId, billNumber, amount } while booking a paid-at-hospital prescription
+  const [scheduledBillNumbers, setScheduledBillNumbers] = useState([]); // rxId's already booked, hidden from Home
 
   const activeBooking = bookings.find((b) => b.id === activeBookingId);
   const flowTotal = cart.reduce((s, c) => s + c.price, 0);
+  const extraTotal = preBilled ? cart.filter((c) => !preBilled.codes.includes(c.code)).reduce((s, c) => s + c.price, 0) : flowTotal;
 
   // navigate: push current screen to history, then switch. Screens that shouldn't
   // be returned to (login, consent gates, confirmation) don't get a back button.
@@ -1870,7 +1991,7 @@ function PatientApp({ onStaffLogin }) {
   const canGoBack = history.length > 0 && !NO_BACK.includes(screen);
 
   const goHome = () => { setTab("home"); setScreenRaw("app"); setHistory([]); setSheet(null); };
-  const resetFlow = () => { setFlowPatient(null); setCart([]); setDraft({}); setPendingCategory(null); setPendingQuery(null); };
+  const resetFlow = () => { setFlowPatient(null); setCart([]); setDraft({}); setPendingCategory(null); setPendingQuery(null); setPreBilled(null); };
 
   /* ----- onboarding ----- */
   if (screen === "login") return wrap(<LoginScreen
@@ -1899,7 +2020,8 @@ function PatientApp({ onStaffLogin }) {
 
   /* ----- booking flow: TESTS FIRST, then who it's for, then schedule ----- */
   if (screen === "book_tests") return chrome("Select tests",
-    <TestSelect step={0} cart={cart} setCart={setCart} onContinue={() => setScreen("book_patient")}
+    <TestSelect step={0} cart={cart} setCart={setCart} preBilled={preBilled}
+      onContinue={() => setScreen(preBilled ? "book_schedule" : "book_patient")}
       initialCategory={pendingCategory} initialQuery={pendingQuery} />, false);
 
   if (screen === "book_patient") return chrome("Who is this test for?",
@@ -1907,23 +2029,25 @@ function PatientApp({ onStaffLogin }) {
       onAdd={() => { setAddingFromDrawer(false); setScreen("newPatient"); }} />, false);
 
   if (screen === "book_schedule") return chrome("Date & Address",
-    <ScheduleScreen step={1} cart={cart} draft={draft} setDraft={setDraft} onContinue={() => setScreen("book_review")} />, false);
+    <ScheduleScreen step={1} cart={cart} draft={draft} setDraft={setDraft} onContinue={() => setScreen("book_review")}
+      preBilled={preBilled} onAddTests={() => setScreen("book_tests")} />, false);
 
   if (screen === "book_review") return chrome("Review Booking",
-    <ReviewScreen step={2} patient={flowPatient} cart={cart} draft={draft}
+    <ReviewScreen step={2} patient={flowPatient} cart={cart} draft={draft} preBilled={preBilled}
       onEdit={(w) => setScreen(w === "patient" ? "book_patient" : w === "tests" ? "book_tests" : "book_schedule")}
-      onPay={() => setScreen("pay_select")} />, false);
+      onPay={() => setScreen("pay_select")}
+      onConfirmPreBilled={() => finalizeBooking("PRE_BILLED", preBilled?.billNumber)} />, false);
 
   if (screen === "pay_select") return chrome("Payment",
-    <PaymentSelect amount={flowTotal}
+    <PaymentSelect amount={extraTotal}
       onUPI={() => setScreen("pay_upi")} onCard={() => setScreen("pay_card")}
-      onCash={() => finalizeBooking("PAY_ON_COLLECTION")} />, false);
+      onCash={() => finalizeBooking(preBilled ? "PARTIALLY_DUE" : "PAY_ON_COLLECTION")} />, false);
 
   if (screen === "pay_upi") return chrome("Pay via UPI",
-    <UpiPayScreen amount={flowTotal} bookingCode={"SB-" + (1000 + bookings.length)} onPaid={() => finalizeBooking("PAID_ONLINE")} />, false);
+    <UpiPayScreen amount={extraTotal} bookingCode={"SB-" + (1000 + bookings.length)} onPaid={() => finalizeBooking(preBilled ? "PARTIALLY_PAID" : "PAID_ONLINE")} />, false);
 
   if (screen === "pay_card") return chrome("Card Payment",
-    <CardPayScreen amount={flowTotal} onPaid={() => finalizeBooking("PAID_ONLINE")} />, false);
+    <CardPayScreen amount={extraTotal} onPaid={() => finalizeBooking(preBilled ? "PARTIALLY_PAID" : "PAID_ONLINE")} />, false);
 
   if (screen === "confirm" && activeBooking) return chrome(activeBooking.justBooked ? "Booking Confirmed" : "Your Booking",
     <ConfirmScreen booking={activeBooking}
@@ -1938,15 +2062,18 @@ function PatientApp({ onStaffLogin }) {
   return wrapApp();
 
   /* ---------- helpers below (closures) ---------- */
-  function finalizeBooking(paymentState) {
+  function finalizeBooking(paymentState, billNumber) {
     const b = {
       id: "b" + uid(), code: "SB-" + (1000 + bookings.length), patientName: flowPatient.name,
       tests: cart, amount: flowTotal, dateLabel: draft.dateLabel, slot: draft.slot,
       address: draft.address, landmark: draft.landmark, status: "CONFIRMED",
-      paymentState, justBooked: true, visitCode: genVisitCode(),
+      paymentState, billNumber: billNumber || preBilled?.billNumber,
+      prebilledAmount: preBilled?.amount, extraAmount: preBilled ? extraTotal : undefined,
+      justBooked: true, visitCode: genVisitCode(),
     };
     setBookings((bs) => [...bs, b]);
     setActiveBookingId(b.id);
+    if (preBilled) setScheduledBillNumbers((ids) => [...ids, preBilled.rxId]);
     resetFlow();
     setScreen("confirm");
   }
@@ -1992,11 +2119,21 @@ function PatientApp({ onStaffLogin }) {
       }
     }
   }
+  function openPaidRx(pb) {
+    const patient = patients.find((p) => p.id === pb.patientId);
+    if (!patient) return;
+    const tests = paidRxTests(pb.codes);
+    setCart(tests);
+    setFlowPatient(patient);
+    setPreBilled({ rxId: pb.id, billNumber: pb.billNumber, amount: tests.reduce((s, t) => s + t.price, 0), codes: pb.codes });
+    setScreen("book_schedule"); // already paid at the hospital — skip tests AND patient selection, and payment later
+  }
   function wrapApp() {
     const visibleNotifs = SEED_NOTIFICATIONS.filter((n) => patients.some((p) => p.id === n.patientId));
     const unreadCount = visibleNotifs.filter((n) => !readNotifIds.includes(n.id)).length;
+    const visiblePaidRx = SEED_PAID_RX.filter((pb) => patients.some((p) => p.id === pb.patientId) && !scheduledBillNumbers.includes(pb.id));
     const body = tab === "home"
-      ? <HomeScreen patients={patients} bookings={bookings} reports={reports}
+      ? <HomeScreen patients={patients} bookings={bookings} reports={reports} paidRx={visiblePaidRx}
           onBook={() => setScreen("book_tests")}
           onSearch={(query) => { setPendingQuery(query); setPendingCategory(null); setScreen("book_tests"); }}
           onQuickAdd={(item) => { setCart((c) => (c.some((x) => x.code === item.code) ? c : [...c, item])); setScreen("book_tests"); }}
@@ -2007,6 +2144,7 @@ function PatientApp({ onStaffLogin }) {
           }}
           onUploadRx={() => setScreen("book_tests")}
           onCall={() => setSheet("call")} onWhatsApp={() => setSheet("whatsapp")}
+          onOpenPaidRx={openPaidRx}
           onOpenBooking={(id) => { setActiveBookingId(id); setScreen("confirm"); }}
           onOpenReports={() => setTab("reports")} />
       : tab === "alerts"
