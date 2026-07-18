@@ -239,6 +239,8 @@ function Icon({ name, size = 22, color = "#fff" }) {
       return <svg {...p}><circle cx="10.5" cy="10.5" r="6.5" stroke={color} strokeWidth="2" fill="none"/><path d="M15.3 15.3 20 20" stroke={color} strokeWidth="2" strokeLinecap="round"/></svg>;
     case "chevronRight":
       return <svg {...p}><path d="M9 5l7 7-7 7" stroke={color} strokeWidth="2.4" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>;
+    case "chevronLeft":
+      return <svg {...p}><path d="M15 5l-7 7 7 7" stroke={color} strokeWidth="2.4" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>;
     case "prescriptionRx":
       return <svg {...p}><text x="12" y="18" textAnchor="middle" fontSize="17" fontWeight="700" fontFamily="Georgia, serif" fill={color}>Rx</text></svg>;
     case "whatsapp":
@@ -1345,10 +1347,17 @@ const SEED_RXQUEUE = [
 const payChip = (p) => ({ PAID_ONLINE: ["success", "Paid online"], PRE_BILLED: ["success", "Pre-billed"], TO_COLLECT: ["warning", "To collect"] }[p] || ["neutral", p]);
 
 /* ---------- phlebo header + bottom nav ---------- */
-function PhleboHeader({ title, sync = "Online" }) {
+function PhleboHeader({ title, sync = "Online", onBack }) {
   const { lang, toggle } = useLang();
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", background: T.brandDeep }}>
+      {onBack && (
+        <button onClick={onBack} aria-label="Back" style={{ background: "rgba(255,255,255,0.14)", border: "none",
+          borderRadius: 999, width: 32, height: 32, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
+          cursor: "pointer", padding: 0 }}>
+          <Icon name="chevronLeft" size={17} color="#fff" />
+        </button>
+      )}
       <div style={{ borderRadius: 999, overflow: "hidden", flexShrink: 0, background: "#fff" }}><Logo size={30} /></div>
       <div style={{ flex: 1 }}>
         <div style={{ color: "#fff", fontWeight: 700, fontSize: 15 }}>{title}</div>
@@ -1792,10 +1801,10 @@ function PhleboApp({ onSignOut }) {
 
   let body, header;
   if (mode === "collect" && v) {
-    header = <PhleboHeader title="Collect Sample" />;
+    header = <PhleboHeader title="Collect Sample" onBack={() => setMode("visit")} />;
     body = <PhleboCollect v={v} onDone={() => { update(v.id, { status: "COLLECTED" }); setMode(null); setOpenId(null); setTab("today"); }} />;
   } else if (mode === "visit" && v) {
-    header = <PhleboHeader title={openIsReadOnly ? "Scheduled Visit" : "Visit"} />;
+    header = <PhleboHeader title={openIsReadOnly ? "Scheduled Visit" : "Visit"} onBack={() => { setMode(null); setOpenId(null); }} />;
     body = <PhleboVisit v={v} readOnly={openIsReadOnly}
       onStart={() => update(v.id, { status: "ON_THE_WAY" })}
       onReached={() => update(v.id, { status: "REACHED", visitCode: genVisitCode() })}
